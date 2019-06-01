@@ -4,7 +4,7 @@ Easy dumping of all Telegram bot stuff.
 
 **Input**: only bot token.
 
-**Output**: bot name & info, all chats text history, bot's users info & photos.
+**Output**: bot name & info, all chats text history & media, bot's users info & photos.
 
 ## Requirements
 
