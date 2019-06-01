@@ -5,27 +5,32 @@ import sys
 import json
 import asyncio
 import socks
+import shutil
 import argparse
+
 from telethon import TelegramClient, events
 from telethon.tl.functions.messages import GetMessagesRequest
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
+from telethon.tl.types import MessageService, MessageEmpty
+from telethon.tl.types import PeerUser, PeerChat
+from telethon.errors.rpcerrorlist import AccessTokenExpiredError
 
 API_ID = 0
 API_HASH = ''
 
+HISTORY_DUMP_STEP = 200
+
 parser = argparse.ArgumentParser()
-parser.add_argument("--bot-session", help="file with Telegram session")
 parser.add_argument("--token", help="Telegram bot token to check")
 parser.add_argument("--tor", help="enable Tor socks proxy", action="store_true")
-parser.add_argument("--brute", help="enable active messages downloading", action="store_true")
 args = parser.parse_args()
 
 proxy = (socks.SOCKS5, '127.0.0.1', 9050) if args.tor else None
 
-bot_token = input("Enter token bot:") if not args.token else args.token
 all_chats = {}
 all_users = {}
+messages_by_chat = {}
 
 def print_bot_info(bot_info):
     print("ID: %s" % bot_info.id)
@@ -67,27 +72,64 @@ def save_text_history(chat_id, messages):
     text_file.write('\n'.join(messages))
     text_file.close()
 
+def save_chats_text_history():
+    for m_chat_id, text_messages in messages_by_chat.items():
+        print("Saving history of %s as a text..." % m_chat_id)
+        save_text_history(m_chat_id, text_messages)
 
+
+bot_token = input("Enter token bot:") if not args.token else args.token
 bot_id = bot_token.split(':')[0]
+
 base_path = bot_id
 if os.path.exists(base_path):
     print("Bot %s info was dumped earlier, will be rewrited!" % bot_id)
+    first_launch = False
 else:
     os.mkdir(base_path)
+    first_launch = True
 
 # advantages of Telethon using for bots: https://github.com/telegram-mtproto/botapi-comparison 
-bot = TelegramClient(os.path.join(base_path, bot_id), API_ID, API_HASH, proxy=proxy).start(bot_token=bot_token)
+try:
+    bot = TelegramClient(os.path.join(base_path, bot_id), API_ID, API_HASH, proxy=proxy).start(bot_token=bot_token)
+except AccessTokenExpiredError as e:
+    print("Token has expired!")
+    if first_launch:
+        shutil.rmtree(base_path)
+    sys.exit()
+
 loop = asyncio.get_event_loop()
 
-async def get_chat_history(from_id, to_id=0, chat_id=None):
+
+async def get_chat_history(from_id=200, to_id=0, chat_id=None):
+    print("Dumping history from %s to %s..." % (from_id, to_id))
     messages = await bot(GetMessagesRequest(range(to_id, from_id)))
-    text_messages = []
+    history_tail = False
     for m in messages.messages:
-        if not m.from_id:
-            continue
-        text = "[%s][%s] %s" % (m.from_id, m.date, m.message)
+        if isinstance(m, MessageEmpty):
+            history_tail = True
+            print('History was fully dumped.')
+            break
+        if not m.message:
+            m.message = m.action
+            if isinstance(m, MessageService):
+                pass
+
+        if isinstance(m.to_id, PeerUser):
+            m_chat_id = int(m.to_id.user_id) if int(m.from_id) == int(bot_id) else int(m.from_id)
+
+        elif isinstance(m.to_id, PeerChat):
+            m_chat_id = m.to_id.chat_id
+
+        text = "[%s][%s][%s] %s" % (m.id, m.from_id, m.date, m.message)
         print(text)
-        text_messages.append(text)
+
+        if not m_chat_id in messages_by_chat:
+            print('create new chat')
+            messages_by_chat[m_chat_id] = []
+
+        messages_by_chat[m_chat_id].append(text)
+
         if m.from_id not in all_users:
             full_user = await bot(GetFullUserRequest(m.from_id))
             user = full_user.user
@@ -96,9 +138,12 @@ async def get_chat_history(from_id, to_id=0, chat_id=None):
             await save_user_photos(user)
             all_users[m.from_id] = user
 
-    print("Saving history of %s as a text..." % chat_id)
-    save_text_history(chat_id, text_messages)
-    return text_messages
+    if not history_tail:
+        await get_chat_history(from_id+HISTORY_DUMP_STEP, to_id+HISTORY_DUMP_STEP)
+        return
+
+    save_chats_text_history()
+
 
 @bot.on(events.NewMessage)
 async def save_new_user_history(event):
@@ -107,14 +152,14 @@ async def save_new_user_history(event):
     chat_id = event.message.chat_id
     if not chat_id in all_chats:
         all_chats[chat_id] = event.message.input_chat
+        messages_by_chat[chat_id] = []
         #TODO: chat name display
         print("="*20 + "\nNEW CHAT DETECTED: %s" % chat_id)
         if user.id not in all_users:
             print_user_info(user)
             save_user_info(user)
             await save_user_photos(user)
-        loop.create_task(get_chat_history(event.message.id, chat_id=chat_id))
-
+    # TODO: new messages saving
 
 if __name__ == '__main__':
     me = loop.run_until_complete(bot.get_me())
@@ -123,9 +168,6 @@ if __name__ == '__main__':
     all_users[me.id] = user
     json.dump(user.user.to_dict(), open(os.path.join(base_path, 'bot.json'), 'w'))
 
-    if args.brute:
-        #TODO: active chat detecting
-        #TODO: get messages from other chats
-        loop.create_task(get_chat_history(1000, chat_id='active_chat'))
+    loop.run_until_complete(get_chat_history())
 
     bot.run_until_disconnected()

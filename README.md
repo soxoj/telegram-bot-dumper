@@ -4,9 +4,7 @@ Easy dumping of all Telegram bot stuff.
 
 **Input**: only bot token.
 
-**Output**: bot name & info, active dialog history, bot's users info, photos & history.
-
-Experimental support of message bruteforcing by id. 
+**Output**: bot name & info, all chats text history, bot's users info & photos.
 
 ## Requirements
 
@@ -21,5 +19,7 @@ pip install -r requirements.txt
 
 vi dumper.py # change API_ID and API_HASH and save
 
-./dumper.py --brute --token 12345678:ABCe2rPVteUWZ7wLeCqCb3CH3ilUY_fLabc
+./dumper.py --token 12345678:ABCe2rPVteUWZ7wLeCqCb3CH3ilUY_fLabc
 ```
+
+Also you can use `--tor` flag for Telegram blocking bypass.
