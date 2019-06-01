@@ -15,6 +15,7 @@ from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.types import MessageService, MessageEmpty
 from telethon.tl.types import PeerUser, PeerChat
 from telethon.errors.rpcerrorlist import AccessTokenExpiredError
+from telethon.tl.types import MessageMediaGeo
 
 API_ID = 0
 API_HASH = ''
@@ -33,17 +34,17 @@ all_users = {}
 messages_by_chat = {}
 
 def print_bot_info(bot_info):
-    print("ID: %s" % bot_info.id)
-    print("Name: %s" % bot_info.first_name)
-    print("Username: @%(u)s - https://t.me/%(u)s" % {'u': bot_info.username})
+    print(f"ID: {bot_info.id}")
+    print(f"Name: {bot_info.first_name}")
+    print(f"Username: @{bot_info.username} - https://t.me/{bot_info.username}")
 
 
 def print_user_info(user_info):
-    print("="*20 + "\nNEW USER DETECTED: %s" % user_info.id)
-    print("First name: %s" % user_info.first_name)
-    print("Last name: %s" % user_info.last_name)
+    print("="*20 + f"\nNEW USER DETECTED: {user_info.id}")
+    print(f"First name: {user_info.first_name}")
+    print(f"Last name: {user_info.last_name}")
     if user_info.username:
-        print("Username: @%(u)s - https://t.me/%(u)s" % {'u': user_info.username})
+        print(f"Username: @{user_info.username} - https://t.me/{user_info.username}")
     else:
         print("User has no username")
 
@@ -52,7 +53,7 @@ def save_user_info(user):
     user_dir = os.path.join(base_path, user_id)
     if not os.path.exists(user_dir):
         os.mkdir(user_dir)
-    json.dump(user.to_dict(), open(os.path.join(user_dir, '%s.json' % user_id), 'w'))
+    json.dump(user.to_dict(), open(os.path.join(user_dir, f'{user_id}.json'), 'w'))
 
 #TODO: save group photos
 async def save_user_photos(user):
@@ -60,21 +61,21 @@ async def save_user_photos(user):
     user_dir = os.path.join(base_path, user_id)
     result = await bot(GetUserPhotosRequest(user_id=user.id,offset=0,max_id=0,limit=100))
     for photo in result.photos:
-        print("Saving photo %s..." % photo.id)
-        await bot.download_file(photo, os.path.join(user_dir, '%s.jpg' % photo.id))
+        print(f"Saving photo {photo.id}...")
+        await bot.download_file(photo, os.path.join(user_dir, f'{photo.id}.jpg'))
 
 
 def save_text_history(chat_id, messages):
     user_dir = os.path.join(base_path, str(chat_id))
     if not os.path.exists(user_dir):
         os.mkdir(user_dir)
-    text_file = open(os.path.join(user_dir, '%s_history.txt' % chat_id), 'w')
+    text_file = open(os.path.join(user_dir, f'{chat_id}_history.txt'), 'w')
     text_file.write('\n'.join(messages))
     text_file.close()
 
 def save_chats_text_history():
     for m_chat_id, text_messages in messages_by_chat.items():
-        print("Saving history of %s as a text..." % m_chat_id)
+        print(f"Saving history of {m_chat_id} as a text...")
         save_text_history(m_chat_id, text_messages)
 
 
@@ -83,7 +84,7 @@ bot_id = bot_token.split(':')[0]
 
 base_path = bot_id
 if os.path.exists(base_path):
-    print("Bot %s info was dumped earlier, will be rewrited!" % bot_id)
+    print(f"Bot {bot_id} info was dumped earlier, will be rewrited!")
     first_launch = False
 else:
     os.mkdir(base_path)
@@ -102,7 +103,7 @@ loop = asyncio.get_event_loop()
 
 
 async def get_chat_history(from_id=200, to_id=0, chat_id=None):
-    print("Dumping history from %s to %s..." % (from_id, to_id))
+    print(f'Dumping history from {from_id} to {to_id}...')
     messages = await bot(GetMessagesRequest(range(to_id, from_id)))
     history_tail = False
     for m in messages.messages:
@@ -111,8 +112,14 @@ async def get_chat_history(from_id=200, to_id=0, chat_id=None):
             print('History was fully dumped.')
             break
         if not m.message:
-            m.message = m.action
+            if m.media:
+                if isinstance(m.media, MessageMediaGeo):
+                    m.message = f'Geoposition: {m.media.geo.long}, {m.media.geo.lat}'
+                #TODO: add other media description
+            else:
+                m.message = m.action
             if isinstance(m, MessageService):
+                #TODO: add text
                 pass
 
         if isinstance(m.to_id, PeerUser):
@@ -121,11 +128,10 @@ async def get_chat_history(from_id=200, to_id=0, chat_id=None):
         elif isinstance(m.to_id, PeerChat):
             m_chat_id = m.to_id.chat_id
 
-        text = "[%s][%s][%s] %s" % (m.id, m.from_id, m.date, m.message)
+        text = f'[{m.id}][{m.from_id}][{m.date}] {m.message}'
         print(text)
 
         if not m_chat_id in messages_by_chat:
-            print('create new chat')
             messages_by_chat[m_chat_id] = []
 
         messages_by_chat[m_chat_id].append(text)
@@ -154,7 +160,7 @@ async def save_new_user_history(event):
         all_chats[chat_id] = event.message.input_chat
         messages_by_chat[chat_id] = []
         #TODO: chat name display
-        print("="*20 + "\nNEW CHAT DETECTED: %s" % chat_id)
+        print('='*20 + f'\nNEW CHAT DETECTED: {chat_id}')
         if user.id not in all_users:
             print_user_info(user)
             save_user_info(user)
