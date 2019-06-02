@@ -16,7 +16,7 @@ from telethon.tl.types import MessageService, MessageEmpty
 from telethon.tl.types import PeerUser, PeerChat
 from telethon.errors.rpcerrorlist import AccessTokenExpiredError
 from telethon.tl.types import MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact
-from telethon.tl.types import DocumentAttributeFilename
+from telethon.tl.types import DocumentAttributeFilename, DocumentAttributeAudio, DocumentAttributeVideo, MessageActionChatEditPhoto
 
 API_ID = 0
 API_HASH = ''
@@ -69,20 +69,23 @@ async def save_user_photos(user):
         await bot.download_file(photo, os.path.join(user_dir, f'{photo.id}.jpg'))
 
 async def save_media_photo(chat_id, photo):
-    user_media_dir = os.path.join(base_path, str(chat_id), 'media')
+    user_media_dir = os.path.join(base_path, chat_id, 'media')
     await bot.download_file(photo, os.path.join(user_media_dir, f'{photo.id}.jpg'))
 
-def get_document_filename(doc_attributes):
-    for attr in doc_attributes:
+def get_document_filename(document):
+    for attr in document.attributes:
         if isinstance(attr, DocumentAttributeFilename):
             return attr.file_name
+        # voice & round video
+        if isinstance(attr, DocumentAttributeAudio) or isinstance(attr, DocumentAttributeVideo):
+            return f'{document.id}.{document.mime_type.split("/")[1]}'
 
 async def save_media_document(chat_id, document):
-    user_media_dir = os.path.join(base_path, str(chat_id), 'media')
-    await bot.download_file(document, os.path.join(user_media_dir, get_document_filename(document.attributes)))
+    user_media_dir = os.path.join(base_path, chat_id, 'media')
+    await bot.download_file(document, os.path.join(user_media_dir, get_document_filename(document)))
 
 def save_text_history(chat_id, messages):
-    user_dir = os.path.join(base_path, str(chat_id))
+    user_dir = os.path.join(base_path, chat_id)
     if not os.path.exists(user_dir):
         os.mkdir(user_dir)
     text_file = open(os.path.join(user_dir, f'{chat_id}_history.txt'), 'w')
@@ -125,10 +128,10 @@ async def get_chat_history(from_id=200, to_id=0, chat_id=None):
     for m in messages.messages:
 
         if isinstance(m.to_id, PeerUser):
-            m_chat_id = int(m.to_id.user_id) if int(m.from_id) == int(bot_id) else int(m.from_id)
+            m_chat_id = str(m.to_id.user_id) if int(m.from_id) == int(bot_id) else str(m.from_id)
 
         elif isinstance(m.to_id, PeerChat):
-            m_chat_id = m.to_id.chat_id
+            m_chat_id = str(m.to_id.chat_id)
 
         if isinstance(m, MessageEmpty):
             history_tail = True
@@ -145,12 +148,16 @@ async def get_chat_history(from_id=200, to_id=0, chat_id=None):
                     m.message = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}, rawdata {m.media.vcard}'
                 elif isinstance(m.media, MessageMediaDocument):
                     await save_media_document(m_chat_id, m.media.document)
-                    m.message = f'Document: media/{get_document_filename(m.media.document.attributes)}'
+                    m.message = f'Document: media/{get_document_filename(m.media.document)}'
                 else:
                     print(m.media)
                 #TODO: add other media description
             else:
-                m.message = m.action
+                if isinstance(m.action, MessageActionChatEditPhoto):
+                    await save_media_photo(m_chat_id, m.action.photo)
+                    m.message = f'Photo of chat was changed: media/{m.action.photo.id}.jpg'
+                else:
+                    m.message = m.action
             if isinstance(m, MessageService):
                 #TODO: add text
                 pass
