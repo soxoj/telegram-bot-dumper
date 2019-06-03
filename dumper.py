@@ -82,7 +82,12 @@ def get_document_filename(document):
 
 async def save_media_document(chat_id, document):
     user_media_dir = os.path.join(base_path, chat_id, 'media')
-    await bot.download_file(document, os.path.join(user_media_dir, get_document_filename(document)))
+    filename = os.path.join(user_media_dir, get_document_filename(document))
+    if os.path.exists(filename):
+        old_filename, extension = os.path.splitext(filename)
+        filename = f'{old_filename}_{document.id}{extension}'
+    await bot.download_file(document, filename)
+    return filename
 
 def save_text_history(chat_id, messages):
     user_dir = os.path.join(base_path, chat_id)
@@ -147,8 +152,9 @@ async def get_chat_history(from_id=200, to_id=0, chat_id=None):
                 elif isinstance(m.media, MessageMediaContact):
                     m.message = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}, rawdata {m.media.vcard}'
                 elif isinstance(m.media, MessageMediaDocument):
-                    await save_media_document(m_chat_id, m.media.document)
-                    m.message = f'Document: media/{get_document_filename(m.media.document)}'
+                    full_filename = await save_media_document(m_chat_id, m.media.document)
+                    filename = os.path.split(full_filename)[-1]
+                    m.message = f'Document: media/{filename}'
                 else:
                     print(m.media)
                 #TODO: add other media description
