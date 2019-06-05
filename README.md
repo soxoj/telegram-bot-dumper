@@ -23,3 +23,7 @@ vi dumper.py # change API_ID and API_HASH and save
 ```
 
 Also you can use `--tor` flag for Telegram blocking bypass.
+
+## Token leaks
+
+Dorks examples: [telepot.bot](https://github.com/search?q=telepot.bot&type=Code)
