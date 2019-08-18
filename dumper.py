@@ -141,34 +141,40 @@ async def get_chat_history(from_id=200, to_id=0, chat_id=None):
         if isinstance(m, MessageEmpty):
             history_tail = True
             print('History was fully dumped.')
+            print('Press Ctrl+C to stop live waiting for new messages...')
             break
-        if not m.message:
-            if m.media:
-                if isinstance(m.media, MessageMediaGeo):
-                    m.message = f'Geoposition: {m.media.geo.long}, {m.media.geo.lat}'
-                elif isinstance(m.media, MessageMediaPhoto):
-                    await save_media_photo(m_chat_id, m.media.photo)
-                    m.message = f'Photo: media/{m.media.photo.id}.jpg'
-                elif isinstance(m.media, MessageMediaContact):
-                    m.message = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}, rawdata {m.media.vcard}'
-                elif isinstance(m.media, MessageMediaDocument):
-                    full_filename = await save_media_document(m_chat_id, m.media.document)
-                    filename = os.path.split(full_filename)[-1]
-                    m.message = f'Document: media/{filename}'
-                else:
-                    print(m.media)
-                #TODO: add other media description
-            else:
-                if isinstance(m.action, MessageActionChatEditPhoto):
-                    await save_media_photo(m_chat_id, m.action.photo)
-                    m.message = f'Photo of chat was changed: media/{m.action.photo.id}.jpg'
-                else:
-                    m.message = m.action
-            if isinstance(m, MessageService):
-                #TODO: add text
-                pass
 
-        text = f'[{m.id}][{m.from_id}][{m.date}] {m.message}'
+        message_text = ''
+
+        if m.media:
+            if isinstance(m.media, MessageMediaGeo):
+                message_text = f'Geoposition: {m.media.geo.long}, {m.media.geo.lat}'
+            elif isinstance(m.media, MessageMediaPhoto):
+                await save_media_photo(m_chat_id, m.media.photo)
+                message_text = f'Photo: media/{m.media.photo.id}.jpg'
+            elif isinstance(m.media, MessageMediaContact):
+                message_text = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}, rawdata {m.media.vcard}'
+            elif isinstance(m.media, MessageMediaDocument):
+                full_filename = await save_media_document(m_chat_id, m.media.document)
+                filename = os.path.split(full_filename)[-1]
+                message_text = f'Document: media/{filename}'
+            else:
+                print(m.media)
+            #TODO: add other media description
+        else:
+            if isinstance(m.action, MessageActionChatEditPhoto):
+                await save_media_photo(m_chat_id, m.action.photo)
+                message_text = f'Photo of chat was changed: media/{m.action.photo.id}.jpg'
+            elif m.action:
+                message_text = str(m.action)
+        if isinstance(m, MessageService):
+            #TODO: add text
+            pass
+
+        if m.message:
+            message_text  = '\n'.join([message_text, m.message]).strip()
+
+        text = f'[{m.id}][{m.from_id}][{m.date}] {message_text}'
         print(text)
 
         if not m_chat_id in messages_by_chat:
