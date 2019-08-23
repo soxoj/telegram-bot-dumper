@@ -90,12 +90,12 @@ async def save_media_document(chat_id, document):
     return filename
 
 def save_text_history(chat_id, messages):
-    user_dir = os.path.join(base_path, chat_id)
+    user_dir = os.path.join(base_path, str(chat_id))
     if not os.path.exists(user_dir):
         os.mkdir(user_dir)
-    text_file = open(os.path.join(user_dir, f'{chat_id}_history.txt'), 'w')
-    text_file.write('\n'.join(messages))
-    text_file.close()
+    history_filename = os.path.join(user_dir, f'{chat_id}_history.txt')
+    with open(history_filename, 'w', encoding='utf-8') as text_file:
+        text_file.write('\n'.join(messages))
 
 def save_chats_text_history():
     for m_chat_id, text_messages in messages_by_chat.items():
@@ -211,6 +211,7 @@ async def save_new_user_history(event):
             print_user_info(user)
             save_user_info(user)
             await save_user_photos(user)
+        print(event.message)
     # TODO: new messages saving
 
 if __name__ == '__main__':
