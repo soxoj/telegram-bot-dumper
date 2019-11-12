@@ -129,7 +129,7 @@ loop = asyncio.get_event_loop()
 async def get_chat_history(from_id=200, to_id=0, chat_id=None):
     print(f'Dumping history from {from_id} to {to_id}...')
     messages = await bot(GetMessagesRequest(range(to_id, from_id)))
-    history_tail = False
+    history_tail = True
     for m in messages.messages:
 
         if isinstance(m.to_id, PeerUser):
@@ -139,11 +139,9 @@ async def get_chat_history(from_id=200, to_id=0, chat_id=None):
             m_chat_id = str(m.to_id.chat_id)
 
         if isinstance(m, MessageEmpty):
-            history_tail = True
-            print('History was fully dumped.')
-            print('Press Ctrl+C to stop live waiting for new messages...')
-            break
+            continue
 
+        history_tail = False
         message_text = ''
 
         if m.media:
@@ -193,6 +191,9 @@ async def get_chat_history(from_id=200, to_id=0, chat_id=None):
     if not history_tail:
         await get_chat_history(from_id+HISTORY_DUMP_STEP, to_id+HISTORY_DUMP_STEP)
         return
+    else:
+        print('History was fully dumped.')
+        print('Press Ctrl+C to stop live waiting for new messages...')
 
     save_chats_text_history()
 
