@@ -14,17 +14,23 @@ from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.types import MessageService, MessageEmpty
 from telethon.tl.types import PeerUser, PeerChat
-from telethon.errors.rpcerrorlist import AccessTokenExpiredError
+from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailError
 from telethon.tl.types import MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact
 from telethon.tl.types import DocumentAttributeFilename, DocumentAttributeAudio, DocumentAttributeVideo, MessageActionChatEditPhoto
 
 API_ID = 0
 API_HASH = ''
 
+# messages count per cycle. it's optimal value, seriously
 HISTORY_DUMP_STEP = 200
+# lookahead counter, useful when supposedly incomplete history
+# you can increase it
+LOOKAHEAD_STEP_COUNT = 0
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--token", help="Telegram bot token to check")
+parser.add_argument("--lookahead", help="Additional cycles to skip empty messages",
+                    default=LOOKAHEAD_STEP_COUNT, type=int)
 parser.add_argument("--tor", help="enable Tor socks proxy", action="store_true")
 args = parser.parse_args()
 
@@ -59,18 +65,30 @@ def save_user_info(user):
         os.mkdir(user_media_dir)
     json.dump(user.to_dict(), open(os.path.join(user_dir, f'{user_id}.json'), 'w'))
 
+async def safe_api_request(coroutine, comment):
+    result = None
+    try:
+        result = await coroutine
+    except RpcCallFailError as e:
+        print(f"Telegram API error, {comment}: {str(e)}")
+    except Exception as e:
+        print(f"Some error, {comment}: {str(e)}")
+    return result
+
 #TODO: save group photos
 async def save_user_photos(user):
     user_id = str(user.id)
     user_dir = os.path.join(base_path, user_id)
-    result = await bot(GetUserPhotosRequest(user_id=user.id,offset=0,max_id=0,limit=100))
+    result = await safe_api_request(bot(GetUserPhotosRequest(user_id=user.id,offset=0,max_id=0,limit=100)), 'get user photos')
+    if not result:
+        return
     for photo in result.photos:
         print(f"Saving photo {photo.id}...")
-        await bot.download_file(photo, os.path.join(user_dir, f'{photo.id}.jpg'))
+        await safe_api_request(bot.download_file(photo, os.path.join(user_dir, f'{photo.id}.jpg')), 'download user photo')
 
 async def save_media_photo(chat_id, photo):
     user_media_dir = os.path.join(base_path, chat_id, 'media')
-    await bot.download_file(photo, os.path.join(user_media_dir, f'{photo.id}.jpg'))
+    await safe_api_request(bot.download_file(photo, os.path.join(user_media_dir, f'{photo.id}.jpg')), 'download media photo')
 
 def get_document_filename(document):
     for attr in document.attributes:
@@ -86,7 +104,7 @@ async def save_media_document(chat_id, document):
     if os.path.exists(filename):
         old_filename, extension = os.path.splitext(filename)
         filename = f'{old_filename}_{document.id}{extension}'
-    await bot.download_file(document, filename)
+    await safe_api_request(bot.download_file(document, filename), 'download file')
     return filename
 
 def save_text_history(chat_id, messages):
@@ -126,9 +144,10 @@ except AccessTokenExpiredError as e:
 loop = asyncio.get_event_loop()
 
 
-async def get_chat_history(from_id=200, to_id=0, chat_id=None):
+async def get_chat_history(from_id=0, to_id=0, chat_id=None, lookahead=0):
     print(f'Dumping history from {from_id} to {to_id}...')
     messages = await bot(GetMessagesRequest(range(to_id, from_id)))
+    empty_message_counter = 0
     history_tail = True
     for m in messages.messages:
 
@@ -139,7 +158,11 @@ async def get_chat_history(from_id=200, to_id=0, chat_id=None):
             m_chat_id = str(m.to_id.chat_id)
 
         if isinstance(m, MessageEmpty):
+            empty_message_counter += 1
             continue
+        elif empty_message_counter:
+            print(f'Empty messages x{empty_message_counter}')
+            empty_message_counter = 0
 
         history_tail = False
         message_text = ''
@@ -188,14 +211,21 @@ async def get_chat_history(from_id=200, to_id=0, chat_id=None):
             await save_user_photos(user)
             all_users[m.from_id] = user
 
+    if empty_message_counter:
+        print(f'Empty messages x{empty_message_counter}')
+        history_tail = True
+
     if not history_tail:
-        await get_chat_history(from_id+HISTORY_DUMP_STEP, to_id+HISTORY_DUMP_STEP)
+        await get_chat_history(from_id+HISTORY_DUMP_STEP, to_id+HISTORY_DUMP_STEP, chat_id, lookahead)
         return
     else:
-        print('History was fully dumped.')
-        print('Press Ctrl+C to stop live waiting for new messages...')
-
-    save_chats_text_history()
+        if lookahead:
+            await get_chat_history(from_id+HISTORY_DUMP_STEP, to_id+HISTORY_DUMP_STEP, chat_id, lookahead-1)
+            return
+        else:
+            print('History was fully dumped.')
+            print('Press Ctrl+C to stop live waiting for new messages...')
+            save_chats_text_history()
 
 
 @bot.on(events.NewMessage)
@@ -220,8 +250,12 @@ if __name__ == '__main__':
     print_bot_info(me)
     user = loop.run_until_complete(bot(GetFullUserRequest(me)))
     all_users[me.id] = user
-    json.dump(user.user.to_dict(), open(os.path.join(base_path, 'bot.json'), 'w'))
 
-    loop.run_until_complete(get_chat_history())
+    user_info = user.user.to_dict()
+    user_info['token'] = bot_token
+    with open(os.path.join(base_path, 'bot.json'), 'w') as bot_info_file:
+        json.dump(user_info, bot_info_file)
+
+    loop.run_until_complete(get_chat_history(from_id=HISTORY_DUMP_STEP, to_id=0, lookahead=args.lookahead))
 
     bot.run_until_disconnected()
