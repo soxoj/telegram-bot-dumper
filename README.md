@@ -25,9 +25,10 @@ vi dumper.py # change API_ID and API_HASH and save
 Some messages can be deleted by bot users. If you suppose that the history was not completely dumped, specify
 cycles count to skip empty messages (200 per cycle by default):
 
-```
+```sh
+# check additionally 5*200 = 1000 messages
+
 ./dumper.py --token 12345678:ABCe2rPVteUWZ7wLeCqCb3CH3ilUY_fLabc --lookeahead 5
-# lookahed by 5*200 = 1000 messages
 ```
 
 Also you can use `--tor` flag for Telegram blocking bypass.
