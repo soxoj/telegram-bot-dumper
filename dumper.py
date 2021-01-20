@@ -18,7 +18,7 @@ from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailErr
 from telethon.tl.types import MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact
 from telethon.tl.types import DocumentAttributeFilename, DocumentAttributeAudio, DocumentAttributeVideo, MessageActionChatEditPhoto
 
-API_ID = 0
+API_ID = 0 
 API_HASH = ''
 
 # messages count per cycle. it's optimal value, seriously
@@ -136,10 +136,10 @@ async def get_chat_history(from_id=0, to_id=0, chat_id=None, lookahead=0):
     for m in messages.messages:
 
         if isinstance(m.to_id, PeerUser):
-            m_chat_id = str(m.to_id.user_id) if int(m.from_id) == int(bot_id) else str(m.from_id)
+            m_chat_id = str(m.to_id.user_id) if int(m.peer_id.user_id) == int(bot_id) else str(m.peer_id.user_id)
 
         elif isinstance(m.to_id, PeerChat):
-            m_chat_id = str(m.to_id.chat_id)
+            m_chat_id = str(m.from_id.user_id)
 
         if isinstance(m, MessageEmpty):
             empty_message_counter += 1
@@ -186,15 +186,19 @@ async def get_chat_history(from_id=0, to_id=0, chat_id=None, lookahead=0):
             messages_by_chat[m_chat_id] = {'buf': [], 'history': []}
 
         messages_by_chat[m_chat_id]['buf'].append(text)
-
-        if m.from_id not in all_users:
-            full_user = await bot(GetFullUserRequest(m.from_id))
+        try:
+           user_id = m.from_id.user_id
+        except AttributeError:
+           user_id = m.peer_id.user_id
+           
+        if user_id not in all_users:
+            full_user = await bot(GetFullUserRequest(user_id))
             user = full_user.user
             print_user_info(user)
             save_user_info(user)
-            remove_old_text_history(m.from_id)
+            remove_old_text_history(user_id)
             await save_user_photos(user)
-            all_users[m.from_id] = user
+            all_users[user_id] = user
 
     if empty_message_counter:
         print(f'Empty messages x{empty_message_counter}')
