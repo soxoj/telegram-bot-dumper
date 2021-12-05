@@ -8,8 +8,8 @@ Easy dumping of all Telegram bot stuff.
 
 ## Requirements
 
-- Python 3.6
-- Telethon >= 1.8.0
+- Python >= 3.6
+- Telethon >= 1.24.0
 - [Register Telegram application](https://core.telegram.org/api/obtaining_api_id) to get API_ID and API_HASH
 
 ## Using
@@ -22,6 +22,20 @@ vi dumper.py # change API_ID and API_HASH and save
 ./dumper.py --token 12345678:ABCe2rPVteUWZ7wLeCqCb3CH3ilUY_fLabc
 ```
 
+Also you can use `--tor` flag for Telegram blocking bypass.
+
+## Testing
+
+You can ask me for bot testing token.
+
+```sh
+python3 -m pytest bot_test.py
+```
+
+## Currently known issues
+
+1. Bot is exiting with not fully dumped history
+
 Some messages can be deleted by bot users. If you suppose that the history was not completely dumped, specify
 cycles count to skip empty messages (200 per cycle by default):
 
@@ -31,7 +45,10 @@ cycles count to skip empty messages (200 per cycle by default):
 ./dumper.py --token 12345678:ABCe2rPVteUWZ7wLeCqCb3CH3ilUY_fLabc --lookeahead 5
 ```
 
-Also you can use `--tor` flag for Telegram blocking bypass.
+2. History was not dumped for chats
+
+I don't know the solution to this problem. :(
+
 
 ## Token leaks
 
