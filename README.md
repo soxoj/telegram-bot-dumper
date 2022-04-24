@@ -29,7 +29,7 @@ Also you can use `--tor` flag for Telegram blocking bypass.
 You can ask me for bot testing token.
 
 ```sh
-python3 -m pytest bot_test.py
+TEST_TOKEN=... python3 -m pytest bot_test.py
 ```
 
 ## Currently known issues
