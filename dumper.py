@@ -165,72 +165,79 @@ def get_from_id(message, bot_id):
     return from_id
 
 
+async def process_message(bot, m, empty_message_counter=0):
+    m_chat_id = get_chat_id(m, bot.id)
+    m_from_id = get_from_id(m, bot.id)
+
+    is_from_user = m_chat_id == m_from_id
+
+    if isinstance(m, MessageEmpty):
+        empty_message_counter += 1
+        return True
+    elif empty_message_counter:
+        print(f'Empty messages x{empty_message_counter}')
+        empty_message_counter = 0
+
+    history_tail = False
+    message_text = ''
+
+    if m.media:
+        if isinstance(m.media, MessageMediaGeo):
+            message_text = f'Geoposition: {m.media.geo.long}, {m.media.geo.lat}'
+        elif isinstance(m.media, MessageMediaPhoto):
+            await save_media_photo(bot, m_chat_id, m.media.photo)
+            message_text = f'Photo: media/{m.media.photo.id}.jpg'
+        elif isinstance(m.media, MessageMediaContact):
+            message_text = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}, rawdata {m.media.vcard}'
+        elif isinstance(m.media, MessageMediaDocument):
+            full_filename = await save_media_document(bot, m_chat_id, m.media.document)
+            filename = os.path.split(full_filename)[-1]
+            message_text = f'Document: media/{filename}'
+        else:
+            print(m.media)
+        #TODO: add other media description
+    else:
+        if isinstance(m.action, MessageActionChatEditPhoto):
+            await save_media_photo(bot, m_chat_id, m.action.photo)
+            message_text = f'Photo of chat was changed: media/{m.action.photo.id}.jpg'
+        elif m.action:
+            message_text = str(m.action)
+    if isinstance(m, MessageService):
+        #TODO: add text
+        pass
+
+    if m.message:
+        message_text  = '\n'.join([message_text, m.message]).strip()
+
+    text = f'[{m.id}][{m_from_id}][{m.date}] {message_text}'
+    print(text)
+
+    if not m_chat_id in messages_by_chat:
+        messages_by_chat[m_chat_id] = {'buf': [], 'history': []}
+
+    messages_by_chat[m_chat_id]['buf'].append(text)
+
+    if is_from_user and m_from_id and m_from_id not in all_users:
+        full_user = await bot(GetFullUserRequest(int(m_from_id)))
+        user = full_user.user
+        print_user_info(user)
+        save_user_info(user)
+        remove_old_text_history(m_from_id)
+        await save_user_photos(bot, user)
+        all_users[m_from_id] = user
+
+    return False
+
+
 async def get_chat_history(bot, from_id=0, to_id=0, chat_id=None, lookahead=0):
     print(f'Dumping history from {from_id} to {to_id}...')
     messages = await bot(GetMessagesRequest(range(to_id, from_id)))
     empty_message_counter = 0
     history_tail = True
     for m in messages.messages:
-
-        m_chat_id = get_chat_id(m, bot.id)
-        m_from_id = get_from_id(m, bot.id)
-
-        is_from_user = m_chat_id == m_from_id
-
-        if isinstance(m, MessageEmpty):
+        is_empty = await process_message(bot, m, empty_message_counter)
+        if is_empty:
             empty_message_counter += 1
-            continue
-        elif empty_message_counter:
-            print(f'Empty messages x{empty_message_counter}')
-            empty_message_counter = 0
-
-        history_tail = False
-        message_text = ''
-
-        if m.media:
-            if isinstance(m.media, MessageMediaGeo):
-                message_text = f'Geoposition: {m.media.geo.long}, {m.media.geo.lat}'
-            elif isinstance(m.media, MessageMediaPhoto):
-                await save_media_photo(bot, m_chat_id, m.media.photo)
-                message_text = f'Photo: media/{m.media.photo.id}.jpg'
-            elif isinstance(m.media, MessageMediaContact):
-                message_text = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}, rawdata {m.media.vcard}'
-            elif isinstance(m.media, MessageMediaDocument):
-                full_filename = await save_media_document(bot, m_chat_id, m.media.document)
-                filename = os.path.split(full_filename)[-1]
-                message_text = f'Document: media/{filename}'
-            else:
-                print(m.media)
-            #TODO: add other media description
-        else:
-            if isinstance(m.action, MessageActionChatEditPhoto):
-                await save_media_photo(bot, m_chat_id, m.action.photo)
-                message_text = f'Photo of chat was changed: media/{m.action.photo.id}.jpg'
-            elif m.action:
-                message_text = str(m.action)
-        if isinstance(m, MessageService):
-            #TODO: add text
-            pass
-
-        if m.message:
-            message_text  = '\n'.join([message_text, m.message]).strip()
-
-        text = f'[{m.id}][{m_from_id}][{m.date}] {message_text}'
-        print(text)
-
-        if not m_chat_id in messages_by_chat:
-            messages_by_chat[m_chat_id] = {'buf': [], 'history': []}
-
-        messages_by_chat[m_chat_id]['buf'].append(text)
-
-        if is_from_user and m_from_id and m_from_id not in all_users:
-            full_user = await bot(GetFullUserRequest(int(m_from_id)))
-            user = full_user.user
-            print_user_info(user)
-            save_user_info(user)
-            remove_old_text_history(m_from_id)
-            await save_user_photos(bot, user)
-            all_users[m_from_id] = user
 
     if empty_message_counter:
         print(f'Empty messages x{empty_message_counter}')
@@ -244,7 +251,6 @@ async def get_chat_history(bot, from_id=0, to_id=0, chat_id=None, lookahead=0):
             return await get_chat_history(bot, from_id+HISTORY_DUMP_STEP, to_id+HISTORY_DUMP_STEP, chat_id, lookahead-1)
         else:
             print('History was fully dumped.')
-            print('Press Ctrl+C to stop live waiting for new messages...')
             return None
 
 
@@ -254,7 +260,6 @@ async def bot_auth(bot_token, proxy=None):
     bot_id = bot_token.split(':')[0]
     base_path = bot_id
     if os.path.exists(base_path):
-        print(f"Bot {bot_id} info was dumped earlier, old results will be erased!")
         import time
         new_path = f'{base_path}_{str(int(time.time()))}'
         os.rename(base_path, new_path)
@@ -288,6 +293,7 @@ async def bot_auth(bot_token, proxy=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--token", help="Telegram bot token to check")
+    parser.add_argument("--listen-only", help="Don't dump all the bot history", action="store_true")
     parser.add_argument("--lookahead", help="Additional cycles to skip empty messages",
                         default=LOOKAHEAD_STEP_COUNT, type=int)
     parser.add_argument("--tor", help="enable Tor socks proxy", action="store_true")
@@ -314,10 +320,14 @@ if __name__ == '__main__':
             if user.id not in all_users:
                 print_user_info(user)
                 save_user_info(user)
-                await save_user_photos(user)
-            print(event.message)
-        # TODO: new messages saving
+                await save_user_photos(bot, user)
 
-    loop.run_until_complete(get_chat_history(bot, from_id=HISTORY_DUMP_STEP, to_id=0, lookahead=args.lookahead))
+        await process_message(bot, event.message)
 
+    if args.listen_only:
+        print("Bot history dumping disabled due to `--listen-only` flag, switching to the listen mode...")
+    else:
+        loop.run_until_complete(get_chat_history(bot, from_id=HISTORY_DUMP_STEP, to_id=0, lookahead=args.lookahead))
+
+    print('Press Ctrl+C to stop listeting for new messages...')
     bot.run_until_disconnected()
