@@ -42,7 +42,7 @@ cycles count to skip empty messages (200 per cycle by default):
 ```sh
 # check additionally 5*200 = 1000 messages
 
-./dumper.py --token 12345678:ABCe2rPVteUWZ7wLeCqCb3CH3ilUY_fLabc --lookeahead 5
+./dumper.py --token 12345678:ABCe2rPVteUWZ7wLeCqCb3CH3ilUY_fLabc --lookahead 5
 ```
 
 2. History was not dumped for chats
