@@ -1,11 +1,10 @@
 import json
-import shutil
 import os
 import pytest
+import shutil
 from telethon.sync import TelegramClient
 
 from dumper import *
-
 
 bot = None
 
@@ -63,4 +62,3 @@ async def test_dumper():
 async def exit_pytest_first_failure():
     yield
     await bot.disconnect()
-    

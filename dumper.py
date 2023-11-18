@@ -1,22 +1,23 @@
 #!/usr/bin/python3.6
 # -*- coding: utf-8 -*-
-import os
-import sys
-import json
-import asyncio
-import socks
-import shutil
 import argparse
+import asyncio
+import json
+import os
+import shutil
+import sys
 
+import socks
 from telethon import TelegramClient, events
+from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailError
 from telethon.tl.functions.messages import GetMessagesRequest
-from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
+from telethon.tl.functions.users import GetFullUserRequest
+from telethon.tl.types import DocumentAttributeFilename, DocumentAttributeAudio, DocumentAttributeVideo, \
+    MessageActionChatEditPhoto
+from telethon.tl.types import MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact
 from telethon.tl.types import MessageService, MessageEmpty
 from telethon.tl.types import PeerUser, PeerChat
-from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailError
-from telethon.tl.types import MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact
-from telethon.tl.types import DocumentAttributeFilename, DocumentAttributeAudio, DocumentAttributeVideo, MessageActionChatEditPhoto
 
 API_ID = 0
 API_HASH = ''
@@ -41,7 +42,7 @@ def print_bot_info(bot_info):
 
 
 def print_user_info(user_info):
-    print("="*20 + f"\nNEW USER DETECTED: {user_info.id}")
+    print("=" * 20 + f"\nNEW USER DETECTED: {user_info.id}")
     print(f"First name: {user_info.first_name}")
     print(f"Last name: {user_info.last_name}")
     if user_info.username:
@@ -72,21 +73,24 @@ async def safe_api_request(coroutine, comment):
     return result
 
 
-#TODO: save group photos
+# TODO: save group photos
 async def save_user_photos(bot, user):
     user_id = str(user.id)
     user_dir = os.path.join(base_path, user_id)
-    result = await safe_api_request(bot(GetUserPhotosRequest(user_id=user.id,offset=0,max_id=0,limit=100)), 'get user photos')
+    result = await safe_api_request(bot(GetUserPhotosRequest(user_id=user.id, offset=0, max_id=0, limit=100)),
+                                    'get user photos')
     if not result:
         return
     for photo in result.photos:
         print(f"Saving photo {photo.id}...")
-        await safe_api_request(bot.download_file(photo, os.path.join(user_dir, f'{photo.id}.jpg')), 'download user photo')
+        await safe_api_request(bot.download_file(photo, os.path.join(user_dir, f'{photo.id}.jpg')),
+                               'download user photo')
 
 
 async def save_media_photo(bot, chat_id, photo):
     user_media_dir = os.path.join(base_path, chat_id, 'media')
-    await safe_api_request(bot.download_file(photo, os.path.join(user_media_dir, f'{photo.id}.jpg')), 'download media photo')
+    await safe_api_request(bot.download_file(photo, os.path.join(user_media_dir, f'{photo.id}.jpg')),
+                           'download media photo')
 
 
 def get_document_filename(document):
@@ -94,7 +98,7 @@ def get_document_filename(document):
         if isinstance(attr, DocumentAttributeFilename):
             return attr.file_name
         # voice & round video
-        if isinstance(attr, DocumentAttributeAudio) or isinstance(attr, DocumentAttributeVideo):
+        if isinstance(attr, (DocumentAttributeAudio, DocumentAttributeVideo)):
             return f'{document.id}.{document.mime_type.split("/")[1]}'
 
 
@@ -122,7 +126,7 @@ def save_text_history(chat_id, messages):
         os.mkdir(user_dir)
     history_filename = os.path.join(user_dir, f'{chat_id}_history.txt')
     with open(history_filename, 'a', encoding='utf-8') as text_file:
-        text_file.write('\n'.join(messages)+'\n')
+        text_file.write('\n'.join(messages) + '\n')
 
 
 def save_chats_text_history():
@@ -140,11 +144,10 @@ def get_chat_id(message, bot_id):
     if isinstance(m.peer_id, PeerUser):
         if not m.to_id or not m.from_id:
             m_chat_id = str(m.peer_id.user_id)
+        elif int(m.from_id.user_id) == int(bot_id):
+            m_chat_id = str(m.to_id.user_id)
         else:
-            if m.from_id and int(m.from_id.user_id) == int(bot_id):
-                m_chat_id = str(m.to_id.user_id)
-            else:
-                m_chat_id = str(m.from_id)
+            m_chat_id = str(m.from_id)
     elif isinstance(m.peer_id, PeerChat):
         m_chat_id = str(m.peer_id.chat_id)
 
@@ -154,14 +157,10 @@ def get_chat_id(message, bot_id):
 def get_from_id(message, bot_id):
     m = message
     from_id = 0
-    if isinstance(m.peer_id, PeerUser):
-        if not m.from_id:
-            from_id = str(m.peer_id.user_id)
-        else:
-            from_id = str(m.from_id.user_id)
-    elif isinstance(m.peer_id, PeerChat):
+    if isinstance(m.peer_id, PeerUser) and not m.from_id:
+        from_id = str(m.peer_id.user_id)
+    elif isinstance(m.peer_id, (PeerUser, PeerChat)):
         from_id = str(m.from_id.user_id)
-
     return from_id
 
 
@@ -195,24 +194,19 @@ async def process_message(bot, m, empty_message_counter=0):
             message_text = f'Document: media/{filename}'
         else:
             print(m.media)
-        #TODO: add other media description
-    else:
-        if isinstance(m.action, MessageActionChatEditPhoto):
-            await save_media_photo(bot, m_chat_id, m.action.photo)
-            message_text = f'Photo of chat was changed: media/{m.action.photo.id}.jpg'
-        elif m.action:
-            message_text = str(m.action)
-    if isinstance(m, MessageService):
-        #TODO: add text
-        pass
-
+        # TODO: add other media description
+    elif isinstance(m.action, MessageActionChatEditPhoto):
+        await save_media_photo(bot, m_chat_id, m.action.photo)
+        message_text = f'Photo of chat was changed: media/{m.action.photo.id}.jpg'
+    elif m.action:
+        message_text = str(m.action)
     if m.message:
-        message_text  = '\n'.join([message_text, m.message]).strip()
+        message_text = '\n'.join([message_text, m.message]).strip()
 
     text = f'[{m.id}][{m_from_id}][{m.date}] {message_text}'
     print(text)
 
-    if not m_chat_id in messages_by_chat:
+    if m_chat_id not in messages_by_chat:
         messages_by_chat[m_chat_id] = {'buf': [], 'history': []}
 
     messages_by_chat[m_chat_id]['buf'].append(text)
@@ -245,13 +239,12 @@ async def get_chat_history(bot, from_id=0, to_id=0, chat_id=None, lookahead=0):
 
     save_chats_text_history()
     if not history_tail:
-        return await get_chat_history(bot, from_id+HISTORY_DUMP_STEP, to_id+HISTORY_DUMP_STEP, chat_id, lookahead)
-    else:
-        if lookahead:
-            return await get_chat_history(bot, from_id+HISTORY_DUMP_STEP, to_id+HISTORY_DUMP_STEP, chat_id, lookahead-1)
-        else:
-            print('History was fully dumped.')
-            return None
+        return await get_chat_history(bot, from_id + HISTORY_DUMP_STEP, to_id + HISTORY_DUMP_STEP, chat_id, lookahead)
+    if lookahead:
+        return await get_chat_history(bot, from_id + HISTORY_DUMP_STEP, to_id + HISTORY_DUMP_STEP, chat_id,
+                                      lookahead - 1)
+    print('History was fully dumped.')
+    return None
 
 
 async def bot_auth(bot_token, proxy=None):
@@ -261,7 +254,7 @@ async def bot_auth(bot_token, proxy=None):
     base_path = bot_id
     if os.path.exists(base_path):
         import time
-        new_path = f'{base_path}_{str(int(time.time()))}'
+        new_path = f'{base_path}_{int(time.time())}'
         os.rename(base_path, new_path)
         os.mkdir(base_path)
         shutil.copyfile(f'{new_path}/{base_path}.session', f'{base_path}/{base_path}.session')
@@ -270,7 +263,8 @@ async def bot_auth(bot_token, proxy=None):
 
     # advantages of Telethon using for bots: https://github.com/telegram-mtproto/botapi-comparison
     try:
-        bot = await TelegramClient(os.path.join(base_path, bot_id), API_ID, API_HASH, proxy=proxy).start(bot_token=bot_token)
+        bot = await TelegramClient(os.path.join(base_path, bot_id), API_ID, API_HASH, proxy=proxy).start(
+            bot_token=bot_token)
         bot.id = bot_id
     except AccessTokenExpiredError as e:
         print("Token has expired!")
@@ -303,26 +297,28 @@ if __name__ == '__main__':
 
     loop = asyncio.get_event_loop()
 
-    bot_token = input("Enter token bot: ") if not args.token else args.token
+    bot_token = args.token or input("Enter token bot: ")
 
     bot = loop.run_until_complete(bot_auth(bot_token))
 
+
     @bot.on(events.NewMessage)
     async def save_new_user_history(event):
-        #TODO: old messages processing
+        # TODO: old messages processing
         user = event.message.sender
         chat_id = event.message.chat_id
-        if not chat_id in all_chats:
+        if chat_id not in all_chats:
             all_chats[chat_id] = event.message.input_chat
             messages_by_chat[chat_id] = {'history': [], 'buf': []}
-            #TODO: chat name display
-            print('='*20 + f'\nNEW CHAT DETECTED: {chat_id}')
+            # TODO: chat name display
+            print('=' * 20 + f'\nNEW CHAT DETECTED: {chat_id}')
             if user.id not in all_users:
                 print_user_info(user)
                 save_user_info(user)
                 await save_user_photos(bot, user)
 
         await process_message(bot, event.message)
+
 
     if args.listen_only:
         print("Bot history dumping disabled due to `--listen-only` flag, switching to the listen mode...")
