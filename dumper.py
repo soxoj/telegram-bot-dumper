@@ -219,7 +219,7 @@ async def process_message(bot, m, empty_message_counter=0):
 
     if is_from_user and m_from_id and m_from_id not in all_users:
         full_user = await bot(GetFullUserRequest(int(m_from_id)))
-        user = full_user.user
+        user = full_user.users[0]
         print_user_info(user)
         save_user_info(user)
         remove_old_text_history(m_from_id)
@@ -280,12 +280,11 @@ async def bot_auth(bot_token, proxy=None):
     print_bot_info(me)
     user = await bot(GetFullUserRequest(me))
     all_users[me.id] = user
-
-    user_info = user.user.to_dict()
+    user_info = user.full_user.to_dict()
     user_info['token'] = bot_token
-
+	
     with open(os.path.join(bot_id, 'bot.json'), 'w') as bot_info_file:
-        json.dump(user_info, bot_info_file)
+        json.dump(user_info, bot_info_file, default=str)
 
     return bot
 
