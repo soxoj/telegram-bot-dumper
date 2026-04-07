@@ -1,10 +1,16 @@
 # telegram-bot-dumper
 
-Easy dumping of all Telegram bot stuff.
+Easy dumping of all Telegram bot stuff. 
 
 **Input**: only bot token.
 
 **Output**: bot name & info, all chats text history & media, bot's users info & photos.
+
+---
+
+This is a Python implementation.
+
+🚀 Fast [Golang version](https://github.com/soxoj/telegram-bot-dumper-go) by [ScBoln](https://github.com/ScBoln).
 
 ## Requirements
 
