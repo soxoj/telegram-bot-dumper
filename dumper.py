@@ -280,7 +280,7 @@ async def bot_auth(bot_token, proxy=None):
     print_bot_info(me)
     user = await bot(GetFullUserRequest(me))
     all_users[me.id] = user
-    user_info = user.full_user.to_dict()
+    user_info = user.users[0].to_dict()
     user_info['token'] = bot_token
 	
     with open(os.path.join(bot_id, 'bot.json'), 'w') as bot_info_file:
