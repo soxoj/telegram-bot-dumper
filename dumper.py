@@ -264,7 +264,9 @@ async def bot_auth(bot_token, proxy=None):
         new_path = f'{base_path}_{str(int(time.time()))}'
         os.rename(base_path, new_path)
         os.mkdir(base_path)
-        shutil.copyfile(f'{new_path}/{base_path}.session', f'{base_path}/{base_path}.session')
+        old_session = f'{new_path}/{base_path}.session'
+        if os.path.exists(old_session):
+            shutil.copyfile(old_session, f'{base_path}/{base_path}.session')
     else:
         os.mkdir(base_path)
 
