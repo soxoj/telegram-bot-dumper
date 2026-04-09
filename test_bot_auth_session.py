@@ -76,4 +76,5 @@ async def test_bot_auth_existing_session_file_is_copied(monkeypatch):
     # The session file should have been copied to the new directory.
     new_session = os.path.join(bot_id, f"{bot_id}.session")
     assert os.path.isfile(new_session)
-    assert open(new_session).read() == "session-data"
+    with open(new_session) as f:
+        assert f.read() == "session-data"
