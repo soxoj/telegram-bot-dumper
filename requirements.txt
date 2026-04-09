@@ -1,2 +1,2 @@
-telethon==1.33.1
+telethon==1.42.0
 pysocks
