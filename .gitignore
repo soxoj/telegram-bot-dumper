@@ -1,2 +1,9 @@
 __pycache__/
 .pytest_cache/
+
+# Telethon session files
+*.session
+*.session-journal
+
+# Per-bot dump directories: <bot_id>/ and rotated <bot_id>_<timestamp>/
+[0-9]*/
