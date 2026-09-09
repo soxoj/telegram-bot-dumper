@@ -14,7 +14,11 @@ This is a Python implementation.
 
 ## Web viewer
 
-A Telegram-Web-like browser UI for a dump: chat list, full message history with inline media, user profiles with a photo carousel, and global search across every conversation at once. Malware often hard-codes a Telegram bot token as its C2/exfil channel — recover that token and this viewer opens the operator's own bot like Telegram Web, so you can read exactly what was exfiltrated: victim fingerprints (host, user, IP, OS), stolen credentials, screenshots, and uploaded archives, laid out as ordinary chats. It reads the existing `<bot_id>/` folders, and in **live mode** runs the dumper in the background and streams new messages to the browser in real time.
+**A Telegram-Web-like browser UI for a dump**: chat list, full message history with inline media, user profiles with a photo carousel, and global search across every conversation at once. **Live mode** supported: it runs the dumper in the background and streams new messages to the browser in real time.
+
+**Use case example.** Malware often hard-codes a Telegram bot token as its C2/exfil channel — recover that token and this viewer opens the operator's own bot like Telegram Web, so you can read exactly what was exfiltrated: victim fingerprints (host, user, IP, OS), stolen credentials, screenshots, and uploaded archives, laid out as ordinary chats.
+
+
 
 ![Web viewer](docs/webapp.png)
 
