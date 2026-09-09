@@ -1,0 +1,8 @@
+.git
+venv
+__pycache__
+.pytest_cache
+*.session
+*.session-journal
+.DS_Store
+[0-9]*/
