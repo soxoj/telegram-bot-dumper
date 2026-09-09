@@ -1,0 +1,10 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8010:8010"
+    volumes:
+      - .:/data          # your dump folders (<bot_id>/) live here
+    environment:         # read from your shell or a local .env (see .env.example)
+      - API_ID           # only needed for live capture; viewing a dump needs neither
+      - API_HASH

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bot Dump Viewer — preview</title>
+<!--
+  Static, self-contained mockup of webapp/index.html for the README screenshot.
+  Layout & CSS are copied verbatim from the real UI; the data is SYNTHETIC on
+  purpose (a real dump holds actual users' names, @handles, phones and faces —
+  those must not ship in a public repo). Open in a browser and screenshot to
+  docs/webapp.png. No server, no JS, no network.
+-->
+<style>
+  :root{
+    --blue:#3390ec; --bg:#ffffff; --panel:#ffffff; --border:#e6e6e6;
+    --hover:#f4f4f5; --active:#3390ec; --in:#ffffff; --out:#eeffde;
+    --muted:#8b96a3; --text:#000000;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{font:14px/1.4 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--text);
+       background:#dfe6ee;overflow:hidden}
+  #app{display:flex;height:100vh}
+  /* sidebar */
+  #side{width:360px;min-width:360px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column}
+  #side header{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)}
+  #side header .title{font-weight:600}
+  #side header .sub{color:var(--muted);font-size:12px}
+  #list{overflow-y:auto;flex:1}
+  .row{display:flex;gap:12px;padding:10px 14px;cursor:pointer;align-items:center;border-bottom:1px solid #f2f2f2}
+  .row:hover{background:var(--hover)}
+  .row.active{background:var(--active)}
+  .row.active .name,.row.active .snippet,.row.active .time,.row.active .badge{color:#fff}
+  .row .meta{flex:1;min-width:0}
+  .row .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .time{color:var(--muted);font-size:12px;white-space:nowrap}
+  .snippet{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}
+  .badge{font-size:11px;color:var(--muted)}
+  .live{font-size:11px;padding:1px 7px;border-radius:8px;margin-left:6px;white-space:nowrap}
+  .live.on{background:#e6f4ea;color:#1a7f37}
+  /* avatar */
+  .av{width:46px;height:46px;border-radius:50%;flex:none;object-fit:cover;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:17px}
+  .av.sm{width:40px;height:40px;font-size:15px}
+  /* main */
+  #main{flex:1;min-width:0;display:flex;flex-direction:column;background:
+     radial-gradient(circle at 20% 20%, #d3ddea 0, transparent 40%),
+     radial-gradient(circle at 80% 70%, #d3ddea 0, transparent 40%), #dbe4ec}
+  #main header{display:flex;align-items:center;gap:12px;padding:10px 18px;background:#fff;border-bottom:1px solid var(--border)}
+  #main header .name{font-weight:600}
+  #main header .sub{color:var(--muted);font-size:12px}
+  #msgs{flex:1;overflow-y:auto;padding:18px 8%;display:flex;flex-direction:column;gap:2px}
+  .day{align-self:center;background:rgba(0,0,0,.28);color:#fff;font-size:12px;padding:3px 10px;border-radius:12px;margin:12px 0}
+  .b{max-width:70%;padding:6px 10px 5px;border-radius:12px;position:relative;box-shadow:0 1px 1px rgba(0,0,0,.08);
+     white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;margin-top:2px}
+  .b.in{align-self:flex-start;background:var(--in);border-top-left-radius:4px}
+  .b.out{align-self:flex-end;background:var(--out);border-top-right-radius:4px}
+  .b .t{font-size:11px;color:var(--muted);float:right;margin:6px 0 0 10px;position:relative;top:3px}
+  .b img.ph{max-width:min(360px,60vw);border-radius:8px;display:block;cursor:zoom-in;margin-bottom:2px}
+  .file{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;padding:4px 2px}
+  .file .ic{width:40px;height:40px;border-radius:50%;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;flex:none}
+  .file .fn{font-weight:500;word-break:break-all}
+  /* search */
+  #searchbar{padding:8px 12px;border-bottom:1px solid var(--border)}
+  #searchbar input{width:100%;padding:8px 14px;border:1px solid var(--border);border-radius:18px;
+     font-size:14px;outline:none;background:#f4f4f5;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <header>
+      <span class="av sm" style="background:#e17076">EX</span>
+      <div><div class="title">exfil logs</div>
+        <div class="sub">@st_exfil_bot · 1,284 chats<span class="live on">● live · 6</span></div></div>
+    </header>
+    <div id="searchbar"><input type="search" placeholder="Search messages" spellcheck="false"></div>
+    <div id="list">
+      <div class="row active">
+        <span class="av" style="background:#e17076">D4</span>
+        <div class="meta">
+          <div class="top"><div class="name">DESKTOP-4F2A9C</div><div class="time">14:05</div></div>
+          <div class="top"><div class="snippet">🔑 42 · 🍪 318 · 💳 3</div><div class="badge">9</div></div>
+        </div>
+      </div>
+      <div class="row">
+        <span class="av" style="background:#7bc862">LK</span>
+        <div class="meta">
+          <div class="top"><div class="name">LAPTOP-KX01B7</div><div class="time">13:48</div></div>
+          <div class="top"><div class="snippet">🖼 New Screenshot Recovered!</div><div class="badge">5</div></div>
+        </div>
+      </div>
+      <div class="row">
+        <span class="av" style="background:#a695e7">WS</span>
+        <div class="meta">
+          <div class="top"><div class="name">WIN-SRV-03</div><div class="time">13:12</div></div>
+          <div class="top"><div class="snippet">📎 Passwords_WIN-SRV-03.txt</div><div class="badge">14</div></div>
+        </div>
+      </div>
+      <div class="row">
+        <span class="av" style="background:#ee7aae">PH</span>
+        <div class="meta">
+          <div class="top"><div class="name">PC-HOME-7</div><div class="time">11:30</div></div>
+          <div class="top"><div class="snippet">💳 Cards: 5</div><div class="badge">6</div></div>
+        </div>
+      </div>
+      <div class="row">
+        <span class="av" style="background:#6ec9cb">D9</span>
+        <div class="meta">
+          <div class="top"><div class="name">DESKTOP-9Q5B2K</div><div class="time">Sep 8</div></div>
+          <div class="top"><div class="snippet">🌍 203.0.113.9 (DE)</div><div class="badge">3</div></div>
+        </div>
+      </div>
+      <div class="row">
+        <span class="av" style="background:#e5ca77">VS</span>
+        <div class="meta">
+          <div class="top"><div class="name">VM-SANDBOX-01</div><div class="time">Sep 8</div></div>
+          <div class="top"><div class="snippet">🆕 New client</div><div class="badge">21</div></div>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <section id="main">
+    <header>
+      <span class="av sm" style="background:#e17076">D4</span>
+      <div><div class="name">DESKTOP-4F2A9C</div><div class="sub">agent · id 6875115613</div></div>
+    </header>
+    <div id="msgs">
+      <div class="day">2026-09-09</div>
+      <div class="b in">🆕 New client
+🖥 Host: DESKTOP-4F2A9C
+👤 User: mspencer
+🌍 IP: 203.0.113.47 (NL, Amsterdam)
+💻 OS: Windows 10 Pro 22H2
+🔑 Passwords: 42   🍪 Cookies: 318   💳 Cards: 3<span class="t">14:01</span></div>
+      <div class="b in"><img class="ph" alt="" src="data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='300' height='176'&gt;&lt;rect width='300' height='176' fill='%233a6ea5'/&gt;&lt;rect x='40' y='24' width='220' height='120' rx='4' fill='%23ffffff'/&gt;&lt;rect x='40' y='24' width='220' height='20' rx='4' fill='%23dfe6ee'/&gt;&lt;circle cx='53' cy='34' r='3' fill='%23e17076'/&gt;&lt;circle cx='63' cy='34' r='3' fill='%23e5ca77'/&gt;&lt;circle cx='73' cy='34' r='3' fill='%237bc862'/&gt;&lt;rect x='53' y='58' width='120' height='8' fill='%23c9d4e0'/&gt;&lt;rect x='53' y='76' width='180' height='8' fill='%23e6ebf1'/&gt;&lt;rect x='53' y='92' width='150' height='8' fill='%23e6ebf1'/&gt;&lt;rect x='53' y='108' width='168' height='8' fill='%23e6ebf1'/&gt;&lt;rect x='0' y='156' width='300' height='20' fill='%23222222'/&gt;&lt;/svg&gt;">📸 New Screenshot Recovered!<span class="t">14:02</span></div>
+      <div class="b in"><a class="file"><div class="ic">📄</div><div class="fn">media/Passwords_DESKTOP-4F2A9C.txt</div></a><span class="t">14:03</span></div>
+      <div class="b in">SOFT: Chrome
+URL: https://portal.example.com/login
+USER: m.spencer@example.com
+PASS: Hunter2!-demo
+
+SOFT: Edge
+URL: https://mail.example.org
+USER: mspencer
+PASS: c0rrect-horse-demo<span class="t">14:03</span></div>
+      <div class="b in"><a class="file"><div class="ic">📄</div><div class="fn">media/cookies_DESKTOP-4F2A9C.zip</div></a><span class="t">14:04</span></div>
+      <div class="b in">📋 Clipboard: bc1qxy2…demo-wallet-not-real<span class="t">14:05</span></div>
+    </div>
+  </section>
+</div>
+</body>
+</html>
