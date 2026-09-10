@@ -22,7 +22,7 @@ directory structure and excludes other chats and bot-level files.
 
 **Use case — pentesting a leaked bot token.** Telegram bot tokens turn up constantly on an engagement — hard-coded in a mobile/desktop app, committed to a repo, or sitting in a CI log, config file, or client-side bundle. On its own a token looks like a low-severity finding; loading it here shows the real blast radius. For an internal bot (support desk, IT/DevOps helper, AI assistant) that is every employee conversation with it — internal hostnames, VPN profiles, credentials, and infrastructure details — browsable and searchable, so you can scope the impact and evidence the finding in your report.
 
-![Web viewer — dump of an internal bot](docs/webapp-corporate.png)
+![Web viewer — dump of an internal bot](docs/source/webapp-corporate.png)
 
 ### Run from a prebuilt image (Docker Hub)
 

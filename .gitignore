@@ -11,3 +11,6 @@ __pycache__/
 
 # Per-bot dump directories: <bot_id>/ and rotated <bot_id>_<timestamp>/
 [0-9]*/
+
+# Sphinx build output
+docs/build/
