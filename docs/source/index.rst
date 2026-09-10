@@ -35,7 +35,9 @@ You may be interested in:
 - :doc:`Command-line options <command-line-options>`
 - :doc:`Output layout <output-layout>`
 - :doc:`How it works <how-it-works>`
-- :doc:`Pentesting a leaked bot token <use-cases/pentesting>`
+- :doc:`FAQ <faq>`
+- :doc:`Use case: malware C2 / exfil bot <use-cases/malware-c2>`
+- :doc:`Use case: pentesting a leaked bot token <use-cases/pentesting>`
 
 .. toctree::
    :hidden:
@@ -57,6 +59,13 @@ You may be interested in:
    :caption: Reference
 
    how-it-works
+   faq
+
+.. toctree::
+   :hidden:
+   :caption: Use cases
+
+   use-cases/malware-c2
    use-cases/pentesting
 
 .. toctree::
