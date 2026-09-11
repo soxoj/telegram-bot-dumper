@@ -9,6 +9,8 @@ import dumper
 from telethon.tl.types import (
     PeerUser, PeerChat, PeerChannel,
     MessageEmpty, MessageMediaPhoto,
+    MessageMediaPoll, MessageMediaVenue, MessageMediaDice, MessageMediaGame,
+    MessageMediaInvoice, MessageMediaGeoLive, MessageMediaWebPage,
 )
 
 
@@ -272,6 +274,140 @@ async def test_process_message_no_media_keeps_text(monkeypatch, capsys):
 
     assert save_calls == []
     assert "Photo: media/12345.jpg" in capsys.readouterr().out
+
+
+# ---------- process_message media descriptions ----------
+
+@pytest.mark.asyncio
+async def test_process_message_media_poll(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    poll = SimpleNamespace(
+        question="Do you prefer Python or Go?",
+        answers=["Python", "Go", "Both"],
+    )
+    m = _message(10, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaPoll(poll=poll, results=None)
+    await dumper.process_message(FakeBot(), m)
+    assert 'Poll: "Do you prefer Python or Go?" [3 options]' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_poll_text_with_entities(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    q_obj = SimpleNamespace(text="Single choice?")
+    poll = SimpleNamespace(question=q_obj, answers=[SimpleNamespace(text="Yes")])
+    m = _message(11, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaPoll(poll=poll, results=None)
+    await dumper.process_message(FakeBot(), m)
+    assert 'Poll: "Single choice?" [1 option]' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_venue(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(12, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaVenue(
+        geo=SimpleNamespace(lat=40.785091, long=-73.968285),
+        title="Central Park",
+        address="New York, NY",
+        provider="foursquare",
+        venue_id="123",
+        venue_type="park",
+    )
+    await dumper.process_message(FakeBot(), m)
+    assert "Venue: Central Park, New York, NY" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_dice(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(13, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaDice(value=6, emoticon="🎲")
+    await dumper.process_message(FakeBot(), m)
+    assert "Dice: 🎲 6" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_game(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(14, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaGame(game=SimpleNamespace(title="Corsairs"))
+    await dumper.process_message(FakeBot(), m)
+    assert "Game: Corsairs" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_invoice(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(15, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaInvoice(
+        title="Donation",
+        description="Support dev",
+        currency="USD",
+        total_amount=500,
+        start_param="donate",
+    )
+    await dumper.process_message(FakeBot(), m)
+    assert "Invoice: Donation (500 USD)" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_geo_live(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(16, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaGeoLive(
+        geo=SimpleNamespace(long=37.6176, lat=55.7558),
+        period=900,
+    )
+    await dumper.process_message(FakeBot(), m)
+    assert "Live geoposition: 37.6176, 55.7558 (period: 900s)" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_webpage(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(17, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaWebPage(
+        webpage=SimpleNamespace(title="Example Domain", url="https://example.com")
+    )
+    await dumper.process_message(FakeBot(), m)
+    assert "WebPage: Example Domain (https://example.com)" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_venue_partial(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(18, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaVenue(
+        geo=None,
+        title="Eiffel Tower",
+        address="",
+        provider="",
+        venue_id="",
+        venue_type="",
+    )
+    await dumper.process_message(FakeBot(), m)
+    assert "Venue: Eiffel Tower" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_dice_emoticon_only(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(19, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaDice(value=None, emoticon="🎯")
+    await dumper.process_message(FakeBot(), m)
+    assert "Dice: 🎯" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_webpage_url_only(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(20, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaWebPage(
+        webpage=SimpleNamespace(title="", url="https://example.org")
+    )
+    await dumper.process_message(FakeBot(), m)
+    assert "WebPage: https://example.org" in capsys.readouterr().out
 
 
 # ---------- process_message empty-counter print contract ----------

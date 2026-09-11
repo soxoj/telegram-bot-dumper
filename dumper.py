@@ -19,7 +19,11 @@ from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.types import MessageService, MessageEmpty, User
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel
 from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailError
-from telethon.tl.types import MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact
+from telethon.tl.types import (
+    MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact,
+    MessageMediaPoll, MessageMediaVenue, MessageMediaDice, MessageMediaGame,
+    MessageMediaInvoice, MessageMediaGeoLive, MessageMediaWebPage,
+)
 from telethon.tl.types import DocumentAttributeFilename, DocumentAttributeAudio, DocumentAttributeVideo, MessageActionChatEditPhoto
 
 # Telegram API credentials from https://my.telegram.org — pass via env (or -e in Docker).
@@ -258,6 +262,76 @@ async def process_message(bot, m, empty_message_counter=0):
                 full_filename = await save_media_document(bot, m_chat_id, m.media.document)
                 filename = os.path.split(full_filename)[-1]
                 message_text = f'Document: media/{filename}'
+        elif isinstance(m.media, MessageMediaPoll):
+            poll = getattr(m.media, 'poll', None)
+            q = getattr(poll, 'question', '') if poll else ''
+            if hasattr(q, 'text'):
+                q = q.text
+            answers = getattr(poll, 'answers', []) if poll else []
+            num_options = len(answers) if answers else 0
+            opt_label = 'option' if num_options == 1 else 'options'
+            message_text = f'Poll: "{q}" [{num_options} {opt_label}]'
+        elif isinstance(m.media, MessageMediaVenue):
+            title = getattr(m.media, 'title', '')
+            address = getattr(m.media, 'address', '')
+            if title and address:
+                message_text = f'Venue: {title}, {address}'
+            elif title:
+                message_text = f'Venue: {title}'
+            elif address:
+                message_text = f'Venue: {address}'
+            else:
+                message_text = 'Venue'
+        elif isinstance(m.media, MessageMediaDice):
+            emoticon = getattr(m.media, 'emoticon', '')
+            value = getattr(m.media, 'value', None)
+            if emoticon and value is not None:
+                message_text = f'Dice: {emoticon} {value}'
+            elif value is not None:
+                message_text = f'Dice: {value}'
+            elif emoticon:
+                message_text = f'Dice: {emoticon}'
+            else:
+                message_text = 'Dice'
+        elif isinstance(m.media, MessageMediaGame):
+            game = getattr(m.media, 'game', None)
+            title = getattr(game, 'title', '') if game else ''
+            if title:
+                message_text = f'Game: {title}'
+            else:
+                message_text = 'Game'
+        elif isinstance(m.media, MessageMediaInvoice):
+            title = getattr(m.media, 'title', '')
+            currency = getattr(m.media, 'currency', '')
+            amount = getattr(m.media, 'total_amount', None)
+            if title and currency and amount is not None:
+                message_text = f'Invoice: {title} ({amount} {currency})'
+            elif title:
+                message_text = f'Invoice: {title}'
+            elif currency and amount is not None:
+                message_text = f'Invoice: {amount} {currency}'
+            else:
+                message_text = 'Invoice'
+        elif isinstance(m.media, MessageMediaGeoLive):
+            geo = getattr(m.media, 'geo', None)
+            period = getattr(m.media, 'period', None)
+            geo_str = f'{geo.long}, {geo.lat}' if geo and hasattr(geo, 'long') and hasattr(geo, 'lat') else ''
+            if geo_str and period:
+                message_text = f'Live geoposition: {geo_str} (period: {period}s)'
+            elif geo_str:
+                message_text = f'Live geoposition: {geo_str}'
+            else:
+                message_text = 'Live geoposition'
+        elif isinstance(m.media, MessageMediaWebPage):
+            webpage = getattr(m.media, 'webpage', None)
+            title = getattr(webpage, 'title', '') if webpage else ''
+            url = getattr(webpage, 'url', '') if webpage else ''
+            if title and url:
+                message_text = f'WebPage: {title} ({url})'
+            elif url:
+                message_text = f'WebPage: {url}'
+            elif title:
+                message_text = f'WebPage: {title}'
         else:
             print(m.media)
         #TODO: add other media description
