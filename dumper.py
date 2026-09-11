@@ -21,6 +21,15 @@ from telethon.tl.types import PeerUser, PeerChat, PeerChannel
 from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailError
 from telethon.tl.types import MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact
 from telethon.tl.types import DocumentAttributeFilename, DocumentAttributeAudio, DocumentAttributeVideo, MessageActionChatEditPhoto
+from telethon.tl.types import (
+    MessageActionChannelCreate, MessageActionChannelMigrateFrom, MessageActionChatAddUser,
+    MessageActionChatCreate, MessageActionChatDeletePhoto, MessageActionChatDeleteUser,
+    MessageActionChatEditTitle, MessageActionChatJoinedByLink, MessageActionChatJoinedByRequest,
+    MessageActionChatMigrateTo, MessageActionContactSignUp, MessageActionCustomAction,
+    MessageActionGameScore, MessageActionGroupCall, MessageActionHistoryClear,
+    MessageActionPhoneCall, MessageActionPinMessage, MessageActionScreenshotTaken,
+    MessageActionTopicCreate,
+)
 
 # Telegram API credentials from https://my.telegram.org — pass via env (or -e in Docker).
 # Never hard-code real values here: this file is public and git history is forever.
@@ -225,6 +234,57 @@ def get_from_id(message, bot_id):
     return from_id
 
 
+def describe_service_action(action, from_id=None, reply_to_msg_id=None):
+    """Readable history text for a service message, e.g. "Joined the group".
+
+    Covers the common MessageAction* types. Anything else falls back to
+    telethon's repr, which is what the history recorded before, so an
+    unmapped action loses nothing.
+    """
+    if isinstance(action, MessageActionChatCreate):
+        return f'Created the group "{action.title}"'
+    if isinstance(action, MessageActionChannelCreate):
+        return f'Created the channel "{action.title}"'
+    if isinstance(action, MessageActionChatEditTitle):
+        return f'Changed the group title to "{action.title}"'
+    if isinstance(action, MessageActionChatDeletePhoto):
+        return 'Removed the group photo'
+    if isinstance(action, MessageActionChatAddUser):
+        users = [str(user_id) for user_id in action.users]
+        if from_id is not None and users == [str(from_id)]:
+            return 'Joined the group'
+        return f'Added {", ".join(users)} to the group'
+    if isinstance(action, MessageActionChatJoinedByLink):
+        return 'Joined the group via invite link'
+    if isinstance(action, MessageActionChatJoinedByRequest):
+        return 'Joined the group (join request approved)'
+    if isinstance(action, MessageActionChatDeleteUser):
+        if from_id is not None and str(action.user_id) == str(from_id):
+            return 'Left the group'
+        return f'Removed {action.user_id} from the group'
+    if isinstance(action, (MessageActionChatMigrateTo, MessageActionChannelMigrateFrom)):
+        return 'Upgraded the group to a supergroup'
+    if isinstance(action, MessageActionPinMessage):
+        return f'Pinned message {reply_to_msg_id}' if reply_to_msg_id else 'Pinned a message'
+    if isinstance(action, MessageActionHistoryClear):
+        return 'Cleared the chat history'
+    if isinstance(action, MessageActionScreenshotTaken):
+        return 'Took a screenshot'
+    if isinstance(action, MessageActionContactSignUp):
+        return 'Joined Telegram'
+    if isinstance(action, MessageActionCustomAction):
+        return action.message
+    if isinstance(action, MessageActionPhoneCall):
+        return f'Phone call ({action.duration} s)' if action.duration else 'Phone call'
+    if isinstance(action, MessageActionGroupCall):
+        return f'Group call ended ({action.duration} s)' if action.duration else 'Started a group call'
+    if isinstance(action, MessageActionTopicCreate):
+        return f'Created the topic "{action.title}"'
+    if isinstance(action, MessageActionGameScore):
+        return f'Scored {action.score} in a game'
+    return str(action)
+
+
 async def process_message(bot, m, empty_message_counter=0):
     m_chat_id = get_chat_id(m, bot.id)
     m_from_id = get_from_id(m, bot.id)
@@ -267,10 +327,12 @@ async def process_message(bot, m, empty_message_counter=0):
                 await save_media_photo(bot, m_chat_id, m.action.photo)
             message_text = f'Photo of chat was changed: media/{m.action.photo.id}.jpg'
         elif m.action:
-            message_text = str(m.action)
-    if isinstance(m, MessageService):
-        #TODO: add text
-        pass
+            reply_to = getattr(m, 'reply_to', None)
+            message_text = describe_service_action(
+                m.action,
+                from_id=m_from_id,
+                reply_to_msg_id=getattr(reply_to, 'reply_to_msg_id', None),
+            )
 
     if m.message:
         message_text  = '\n'.join([message_text, m.message]).strip()
