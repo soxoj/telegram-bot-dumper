@@ -9,6 +9,8 @@ import dumper
 from telethon.tl.types import (
     PeerUser, PeerChat, PeerChannel,
     MessageEmpty, MessageMediaPhoto,
+    ReplyInlineMarkup, KeyboardButton, KeyboardButtonUrl,
+    KeyboardButtonRow,
 )
 
 
@@ -234,6 +236,24 @@ async def test_process_message_supergroup_format(monkeypatch, capsys):
     await dumper.process_message(FakeBot(), m)
     out = capsys.readouterr().out
     assert "[5][from:42][group:8888][2026-04-01] x" in out
+
+@pytest.mark.asyncio
+async def test_process_message_records_keyboard_buttons(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+
+    m = _message(5, PeerUser(user_id=42), PeerUser(user_id=42), text="Choose an option")
+    m.reply_markup = ReplyInlineMarkup(rows=[
+        KeyboardButtonRow(buttons=[
+            KeyboardButton(text="Menu"),
+            KeyboardButton(text="🔎 Search"),
+            KeyboardButtonUrl(text="Website", url="https://example.com"),
+        ])
+    ])
+
+    await dumper.process_message(FakeBot(), m)
+
+    out = capsys.readouterr().out
+    assert "Buttons: [Menu] [🔎 Search] [Website → https://example.com]" in out
 
 
 # ---------- process_message NO_HISTORY ----------

@@ -21,6 +21,7 @@ from telethon.tl.types import PeerUser, PeerChat, PeerChannel
 from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailError
 from telethon.tl.types import MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact
 from telethon.tl.types import DocumentAttributeFilename, DocumentAttributeAudio, DocumentAttributeVideo, MessageActionChatEditPhoto
+from telethon.tl.types import KeyboardButtonUrl
 
 # Telegram API credentials from https://my.telegram.org — pass via env (or -e in Docker).
 # Never hard-code real values here: this file is public and git history is forever.
@@ -274,6 +275,21 @@ async def process_message(bot, m, empty_message_counter=0):
 
     if m.message:
         message_text  = '\n'.join([message_text, m.message]).strip()
+
+    if getattr(m, 'reply_markup', None):
+        buttons = []
+        for row in m.reply_markup.rows:
+            for button in row.buttons:
+                if isinstance(button, KeyboardButtonUrl):
+                    buttons.append(f'[{button.text} → {button.url}]')
+                else:
+                    buttons.append(f'[{button.text}]')
+
+        if buttons:
+            message_text = '\n'.join([
+                message_text,
+                'Buttons: ' + ' '.join(buttons)
+            ]).strip()
 
     is_group = isinstance(m.peer_id, (PeerChat, PeerChannel))
     is_outgoing_pm = (str(m_from_id) == str(bot.id)
