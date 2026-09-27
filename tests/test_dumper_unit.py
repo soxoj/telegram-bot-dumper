@@ -35,10 +35,16 @@ class FakeBot:
         self.response = response
         self.id = id
         self.calls = []
+        self.downloaded_photos = []
 
     async def __call__(self, request):
         self.calls.append(request)
         return self.response
+
+    async def download_profile_photo(self, entity, file=None):
+        self.downloaded_photos.append((entity, file))
+        return "fake_photo.jpg"
+
 
 
 # ---------- chat_display_name ----------
@@ -167,6 +173,24 @@ async def test_save_user_photos_no_photos_skips_api(monkeypatch):
     await dumper.save_user_photos(bot, _user_stub(id=42))
     assert bot.calls == []
 
+# ---------- save_chat_photo ----------
+# NO_PHOTOS = True
+@pytest.mark.asyncio
+async def test_save_chat_photo_no_photos_skips_api(monkeypatch):
+    monkeypatch.setattr(dumper, "NO_PHOTOS", True)
+    bot = FakeBot()
+    chat = SimpleNamespace(id=12345)
+    await dumper.save_chat_photo(bot, chat)
+    assert len(bot.downloaded_photos) == 0
+
+# NO_PHOTOS = False
+@pytest.mark.asyncio
+async def test_save_chat_photo_works(monkeypatch):
+    monkeypatch.setattr(dumper, "NO_PHOTOS", False)
+    bot = FakeBot()
+    chat = SimpleNamespace(id=12345)
+    await dumper.save_chat_photo(bot, chat)
+    assert len(bot.downloaded_photos) == 1
 
 # ---------- save_chats_text_history ----------
 

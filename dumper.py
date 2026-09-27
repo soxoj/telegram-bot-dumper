@@ -130,7 +130,18 @@ async def safe_api_request(coroutine, comment):
     return result
 
 
-#TODO: save group photos
+async def save_chat_photo(bot, chat):
+    if NO_PHOTOS:
+        return
+    chat_id = str(chat.id)
+    chat_dir = os.path.join(base_path, chat_id)
+    if not os.path.exists(chat_dir):
+        os.mkdir(chat_dir)
+    result = await safe_api_request(bot.download_profile_photo(chat, file=chat_dir), 'download chat photo')
+    if not result:
+        return
+
+
 async def save_user_photos(bot, user):
     if NO_PHOTOS:
         return
@@ -584,7 +595,6 @@ async def bot_auth(bot_token, proxy=None):
     all_users[me.id] = user
     user_info = user.users[0].to_dict()
     user_info['token'] = bot_token
-	
     with open(os.path.join(bot_id, 'bot.json'), 'w') as bot_info_file:
         json.dump(user_info, bot_info_file, default=str)
 
@@ -605,6 +615,8 @@ async def main(args):
         chat = await event.get_chat()
         chat_id = event.message.chat_id
         if not chat_id in all_chats:
+            if isinstance(event.message.peer_id, (PeerChat, PeerChannel)):
+                await save_chat_photo(bot, chat)
             all_chats[chat_id] = event.message.input_chat
             messages_by_chat[chat_id] = {'history': [], 'buf': []}
             print('='*20 + f'\nNEW CHAT DETECTED: {chat_id} {chat_display_name(chat)}')
