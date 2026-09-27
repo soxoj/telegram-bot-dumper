@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import argparse
-import asyncio
+import os
+import sys
 import csv
 import json
-import logging
-import os
-import shutil
-import sys
-
+import asyncio
 import socks
+import shutil
+import logging
+import argparse
 
 logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s: %(message)s', level=logging.WARNING)
 
 from telethon import TelegramClient, events
+from telethon.tl.functions.messages import GetMessagesRequest
+from telethon.tl.functions.users import GetFullUserRequest
+from telethon.tl.functions.photos import GetUserPhotosRequest
+from telethon.tl.types import MessageService, MessageEmpty, User
+from telethon.tl.types import PeerUser, PeerChat, PeerChannel
 from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailError
 from telethon.tl.types import (
     MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact,
@@ -595,11 +599,7 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
     all_users[me.id] = user
     user_info = user.users[0].to_dict()
     user_info['token'] = bot_token
-<<<<<<< HEAD
-    with open(os.path.join(bot_id, 'bot.json'), 'w') as bot_info_file:
-=======
     with open(os.path.join(base_path, 'bot.json'), 'w') as bot_info_file:
->>>>>>> 8a3266f (feat: add --output flag to choose dump directory (#38))
         json.dump(user_info, bot_info_file, default=str)
 
     return bot
