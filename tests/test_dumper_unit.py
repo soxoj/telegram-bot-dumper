@@ -506,3 +506,75 @@ async def test_probe_max_id_all_empty_returns_zero():
     msgs = [MessageEmpty(id=c, peer_id=None) for c in candidates]
     bot = FakeBot(response=SimpleNamespace(messages=msgs))
     assert await dumper.probe_max_id(bot) == 0
+
+
+# --- service messages (#33) -------------------------------------------------
+
+from telethon.tl.types import (  # noqa: E402
+    MessageActionBoostApply, MessageActionChatAddUser, MessageActionChatCreate,
+    MessageActionChatDeletePhoto, MessageActionChatDeleteUser, MessageActionChatEditTitle,
+    MessageActionChatJoinedByLink, MessageActionChatMigrateTo, MessageActionCustomAction,
+    MessageActionGroupCall, MessageActionHistoryClear, MessageActionPhoneCall,
+    MessageActionPinMessage,
+)
+
+
+@pytest.mark.parametrize("action, from_id, reply_to_msg_id, expected", [
+    (MessageActionChatCreate(title="Team", users=[1, 2]), None, None, 'Created the group "Team"'),
+    (MessageActionChatEditTitle(title="New name"), None, None, 'Changed the group title to "New name"'),
+    (MessageActionChatDeletePhoto(), None, None, 'Removed the group photo'),
+    (MessageActionChatAddUser(users=[42]), 42, None, 'Joined the group'),
+    (MessageActionChatAddUser(users=[7, 8]), 42, None, 'Added 7, 8 to the group'),
+    (MessageActionChatJoinedByLink(inviter_id=5), 42, None, 'Joined the group via invite link'),
+    (MessageActionChatDeleteUser(user_id=42), 42, None, 'Left the group'),
+    (MessageActionChatDeleteUser(user_id=7), 42, None, 'Removed 7 from the group'),
+    (MessageActionChatMigrateTo(channel_id=100), None, None, 'Upgraded the group to a supergroup'),
+    (MessageActionPinMessage(), None, 17, 'Pinned message 17'),
+    (MessageActionPinMessage(), None, None, 'Pinned a message'),
+    (MessageActionHistoryClear(), None, None, 'Cleared the chat history'),
+    (MessageActionCustomAction(message="Bot says hi"), None, None, 'Bot says hi'),
+    (MessageActionPhoneCall(call_id=1, duration=65), None, None, 'Phone call (65 s)'),
+    (MessageActionGroupCall(call=None, duration=None), None, None, 'Started a group call'),
+])
+def test_describe_service_action(action, from_id, reply_to_msg_id, expected):
+    assert dumper.describe_service_action(
+        action, from_id=from_id, reply_to_msg_id=reply_to_msg_id,
+    ) == expected
+
+
+def test_describe_service_action_keeps_repr_for_unmapped_types():
+    """An action without a description keeps what the history recorded before."""
+    action = MessageActionBoostApply(boosts=2)
+    assert dumper.describe_service_action(action) == str(action)
+
+
+def _service_message(action, reply_to=None):
+    """A service message in a basic group, sent by user 42."""
+    return SimpleNamespace(
+        id=5, peer_id=PeerChat(chat_id=100), from_id=PeerUser(user_id=42), to_id=None,
+        date="2026-09-11 10:00:00", media=None, message="", action=action, reply_to=reply_to,
+    )
+
+
+def _history_line():
+    (chat,) = dumper.messages_by_chat.values()
+    return chat["buf"][-1]
+
+
+@pytest.mark.asyncio
+async def test_service_message_lands_in_history_as_readable_text():
+    """Goes through the real get_from_id, so the self-join check sees the actual sender."""
+    await dumper.process_message(FakeBot(), _service_message(MessageActionChatAddUser(users=[42])))
+
+    line = _history_line()
+    assert line.endswith("Joined the group")
+    assert "MessageActionChatAddUser" not in line
+    assert line.startswith("[5][from:42]")
+
+
+@pytest.mark.asyncio
+async def test_pinned_service_message_names_the_pinned_message():
+    reply_to = SimpleNamespace(reply_to_msg_id=17)
+    await dumper.process_message(FakeBot(), _service_message(MessageActionPinMessage(), reply_to))
+
+    assert _history_line().endswith("Pinned message 17")
