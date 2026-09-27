@@ -10,6 +10,7 @@ from dumper import *
 bot = None
 
 
+@pytest.mark.skipif(not os.getenv('TEST_TOKEN'), reason="TEST_TOKEN is not set")
 @pytest.mark.asyncio
 async def test_dumper():
     global bot
@@ -62,5 +63,5 @@ async def test_dumper():
 @pytest.mark.asyncio
 async def exit_pytest_first_failure():
     yield
-    await bot.disconnect()
-    
+    if bot is not None:
+        await bot.disconnect()
