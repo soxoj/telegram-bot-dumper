@@ -301,157 +301,165 @@ def describe_service_action(action, from_id=None, reply_to_msg_id=None):
 
 
 async def process_message(bot, m, empty_message_counter=0):
-    m_chat_id = get_chat_id(m, bot.id)
-    m_from_id = get_from_id(m, bot.id)
+    try:
+        m_chat_id = get_chat_id(m, bot.id)
+        m_from_id = get_from_id(m, bot.id)
 
-    is_from_user = m_chat_id == m_from_id
+        is_from_user = m_chat_id == m_from_id
 
-    if isinstance(m, MessageEmpty):
-        empty_message_counter += 1
-        return True
-    elif empty_message_counter:
-        print(f'Empty messages x{empty_message_counter}')
-        empty_message_counter = 0
+        if isinstance(m, MessageEmpty):
+            empty_message_counter += 1
+            return True
+        elif empty_message_counter:
+            print(f'Empty messages x{empty_message_counter}')
+            empty_message_counter = 0
 
-    history_tail = False
-    message_text = ''
+        history_tail = False
+        message_text = ''
 
-    if m.media:
-        if isinstance(m.media, MessageMediaGeo):
-            message_text = f'Geoposition: {m.media.geo.long}, {m.media.geo.lat}'
-        elif isinstance(m.media, MessageMediaPhoto):
-            if not NO_MEDIA:
-                await save_media_photo(bot, m_chat_id, m.media.photo)
-            message_text = f'Photo: media/{m.media.photo.id}.jpg'
-        elif isinstance(m.media, MessageMediaContact):
-            message_text = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}, rawdata {m.media.vcard}'
-        elif isinstance(m.media, MessageMediaDocument):
-            if NO_MEDIA:
-                filename = get_document_filename(m.media.document) or f'{m.media.document.id}'
-                message_text = f'Document: media/{filename} (skipped)'
+        if m.media:
+            if isinstance(m.media, MessageMediaGeo):
+                message_text = f'Geoposition: {m.media.geo.long}, {m.media.geo.lat}'
+            elif isinstance(m.media, MessageMediaPhoto):
+                if not NO_MEDIA:
+                    await save_media_photo(bot, m_chat_id, m.media.photo)
+                message_text = f'Photo: media/{m.media.photo.id}.jpg'
+            elif isinstance(m.media, MessageMediaContact):
+                message_text = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}, rawdata {m.media.vcard}'
+            elif isinstance(m.media, MessageMediaDocument):
+                if NO_MEDIA:
+                    filename = get_document_filename(m.media.document) or f'{m.media.document.id}'
+                    message_text = f'Document: media/{filename} (skipped)'
+                else:
+                    full_filename = await save_media_document(bot, m_chat_id, m.media.document)
+                    filename = os.path.split(full_filename)[-1]
+                    message_text = f'Document: media/{filename}'
+            elif isinstance(m.media, MessageMediaPoll):
+                poll = getattr(m.media, 'poll', None)
+                q = getattr(poll, 'question', '') if poll else ''
+                if hasattr(q, 'text'):
+                    q = q.text
+                answers = getattr(poll, 'answers', []) if poll else []
+                num_options = len(answers) if answers else 0
+                opt_label = 'option' if num_options == 1 else 'options'
+                message_text = f'Poll: "{q}" [{num_options} {opt_label}]'
+            elif isinstance(m.media, MessageMediaVenue):
+                title = getattr(m.media, 'title', '')
+                address = getattr(m.media, 'address', '')
+                if title and address:
+                    message_text = f'Venue: {title}, {address}'
+                elif title:
+                    message_text = f'Venue: {title}'
+                elif address:
+                    message_text = f'Venue: {address}'
+                else:
+                    message_text = 'Venue'
+            elif isinstance(m.media, MessageMediaDice):
+                emoticon = getattr(m.media, 'emoticon', '')
+                value = getattr(m.media, 'value', None)
+                if emoticon and value is not None:
+                    message_text = f'Dice: {emoticon} {value}'
+                elif value is not None:
+                    message_text = f'Dice: {value}'
+                elif emoticon:
+                    message_text = f'Dice: {emoticon}'
+                else:
+                    message_text = 'Dice'
+            elif isinstance(m.media, MessageMediaGame):
+                game = getattr(m.media, 'game', None)
+                title = getattr(game, 'title', '') if game else ''
+                if title:
+                    message_text = f'Game: {title}'
+                else:
+                    message_text = 'Game'
+            elif isinstance(m.media, MessageMediaInvoice):
+                title = getattr(m.media, 'title', '')
+                currency = getattr(m.media, 'currency', '')
+                amount = getattr(m.media, 'total_amount', None)
+                if title and currency and amount is not None:
+                    message_text = f'Invoice: {title} ({amount} {currency})'
+                elif title:
+                    message_text = f'Invoice: {title}'
+                elif currency and amount is not None:
+                    message_text = f'Invoice: {amount} {currency}'
+                else:
+                    message_text = 'Invoice'
+            elif isinstance(m.media, MessageMediaGeoLive):
+                geo = getattr(m.media, 'geo', None)
+                period = getattr(m.media, 'period', None)
+                geo_str = f'{geo.long}, {geo.lat}' if geo and hasattr(geo, 'long') and hasattr(geo, 'lat') else ''
+                if geo_str and period:
+                    message_text = f'Live geoposition: {geo_str} (period: {period}s)'
+                elif geo_str:
+                    message_text = f'Live geoposition: {geo_str}'
+                else:
+                    message_text = 'Live geoposition'
+            elif isinstance(m.media, MessageMediaWebPage):
+                webpage = getattr(m.media, 'webpage', None)
+                title = getattr(webpage, 'title', '') if webpage else ''
+                url = getattr(webpage, 'url', '') if webpage else ''
+                if title and url:
+                    message_text = f'WebPage: {title} ({url})'
+                elif url:
+                    message_text = f'WebPage: {url}'
+                elif title:
+                    message_text = f'WebPage: {title}'
             else:
-                full_filename = await save_media_document(bot, m_chat_id, m.media.document)
-                filename = os.path.split(full_filename)[-1]
-                message_text = f'Document: media/{filename}'
-        elif isinstance(m.media, MessageMediaPoll):
-            poll = getattr(m.media, 'poll', None)
-            q = getattr(poll, 'question', '') if poll else ''
-            if hasattr(q, 'text'):
-                q = q.text
-            answers = getattr(poll, 'answers', []) if poll else []
-            num_options = len(answers) if answers else 0
-            opt_label = 'option' if num_options == 1 else 'options'
-            message_text = f'Poll: "{q}" [{num_options} {opt_label}]'
-        elif isinstance(m.media, MessageMediaVenue):
-            title = getattr(m.media, 'title', '')
-            address = getattr(m.media, 'address', '')
-            if title and address:
-                message_text = f'Venue: {title}, {address}'
-            elif title:
-                message_text = f'Venue: {title}'
-            elif address:
-                message_text = f'Venue: {address}'
-            else:
-                message_text = 'Venue'
-        elif isinstance(m.media, MessageMediaDice):
-            emoticon = getattr(m.media, 'emoticon', '')
-            value = getattr(m.media, 'value', None)
-            if emoticon and value is not None:
-                message_text = f'Dice: {emoticon} {value}'
-            elif value is not None:
-                message_text = f'Dice: {value}'
-            elif emoticon:
-                message_text = f'Dice: {emoticon}'
-            else:
-                message_text = 'Dice'
-        elif isinstance(m.media, MessageMediaGame):
-            game = getattr(m.media, 'game', None)
-            title = getattr(game, 'title', '') if game else ''
-            if title:
-                message_text = f'Game: {title}'
-            else:
-                message_text = 'Game'
-        elif isinstance(m.media, MessageMediaInvoice):
-            title = getattr(m.media, 'title', '')
-            currency = getattr(m.media, 'currency', '')
-            amount = getattr(m.media, 'total_amount', None)
-            if title and currency and amount is not None:
-                message_text = f'Invoice: {title} ({amount} {currency})'
-            elif title:
-                message_text = f'Invoice: {title}'
-            elif currency and amount is not None:
-                message_text = f'Invoice: {amount} {currency}'
-            else:
-                message_text = 'Invoice'
-        elif isinstance(m.media, MessageMediaGeoLive):
-            geo = getattr(m.media, 'geo', None)
-            period = getattr(m.media, 'period', None)
-            geo_str = f'{geo.long}, {geo.lat}' if geo and hasattr(geo, 'long') and hasattr(geo, 'lat') else ''
-            if geo_str and period:
-                message_text = f'Live geoposition: {geo_str} (period: {period}s)'
-            elif geo_str:
-                message_text = f'Live geoposition: {geo_str}'
-            else:
-                message_text = 'Live geoposition'
-        elif isinstance(m.media, MessageMediaWebPage):
-            webpage = getattr(m.media, 'webpage', None)
-            title = getattr(webpage, 'title', '') if webpage else ''
-            url = getattr(webpage, 'url', '') if webpage else ''
-            if title and url:
-                message_text = f'WebPage: {title} ({url})'
-            elif url:
-                message_text = f'WebPage: {url}'
-            elif title:
-                message_text = f'WebPage: {title}'
+                print(m.media)
+            #TODO: add other media description
         else:
-            print(m.media)
-        #TODO: add other media description
-    else:
-        if isinstance(m.action, MessageActionChatEditPhoto):
-            if not NO_MEDIA:
-                await save_media_photo(bot, m_chat_id, m.action.photo)
-            message_text = f'Photo of chat was changed: media/{m.action.photo.id}.jpg'
-        elif m.action:
-            reply_to = getattr(m, 'reply_to', None)
-            message_text = describe_service_action(
-                m.action,
-                from_id=m_from_id,
-                reply_to_msg_id=getattr(reply_to, 'reply_to_msg_id', None),
-            )
+            if isinstance(m.action, MessageActionChatEditPhoto):
+                if not NO_MEDIA:
+                    await save_media_photo(bot, m_chat_id, m.action.photo)
+                message_text = f'Photo of chat was changed: media/{m.action.photo.id}.jpg'
+            elif m.action:
+                reply_to = getattr(m, 'reply_to', None)
+                message_text = describe_service_action(
+                    m.action,
+                    from_id=m_from_id,
+                    reply_to_msg_id=getattr(reply_to, 'reply_to_msg_id', None),
+                )
 
-    if m.message:
-        message_text  = '\n'.join([message_text, m.message]).strip()
+        if m.message:
+            message_text  = '\n'.join([message_text, m.message]).strip()
 
-    is_group = isinstance(m.peer_id, (PeerChat, PeerChannel))
-    is_outgoing_pm = (str(m_from_id) == str(bot.id)
-                      and isinstance(m.peer_id, PeerUser)
-                      and m_chat_id and str(m_chat_id) != str(m_from_id))
-    if is_group:
-        text = f'[{m.id}][from:{m_from_id}][group:{m_chat_id}][{m.date}] {message_text}'
-    elif is_outgoing_pm:
-        text = f'[{m.id}][{m_from_id}][to:{m_chat_id}][{m.date}] {message_text}'
-    else:
-        text = f'[{m.id}][{m_from_id}][{m.date}] {message_text}'
-    print(text)
+        is_group = isinstance(m.peer_id, (PeerChat, PeerChannel))
+        is_outgoing_pm = (str(m_from_id) == str(bot.id)
+                          and isinstance(m.peer_id, PeerUser)
+                          and m_chat_id and str(m_chat_id) != str(m_from_id))
+        if is_group:
+            text = f'[{m.id}][from:{m_from_id}][group:{m_chat_id}][{m.date}] {message_text}'
+        elif is_outgoing_pm:
+            text = f'[{m.id}][{m_from_id}][to:{m_chat_id}][{m.date}] {message_text}'
+        else:
+            text = f'[{m.id}][{m_from_id}][{m.date}] {message_text}'
+        print(text)
 
-    if not NO_HISTORY:
-        if not m_chat_id in messages_by_chat:
-            messages_by_chat[m_chat_id] = {'buf': [], 'history': []}
-        messages_by_chat[m_chat_id]['buf'].append(text)
+        if not NO_HISTORY:
+            if not m_chat_id in messages_by_chat:
+                messages_by_chat[m_chat_id] = {'buf': [], 'history': []}
+            messages_by_chat[m_chat_id]['buf'].append(text)
 
-    if ON_MESSAGE:
-        ON_MESSAGE(m_chat_id, text)
+        if ON_MESSAGE:
+            ON_MESSAGE(m_chat_id, text)
 
-    user_to_resolve = None
-    if is_from_user and m_from_id:
-        user_to_resolve = m_from_id
-    elif (isinstance(m.peer_id, PeerUser)
-          and str(m_from_id) == str(bot.id)
-          and m_chat_id and str(m_chat_id) != str(bot.id)):
-        user_to_resolve = m_chat_id
+        user_to_resolve = None
+        if is_from_user and m_from_id:
+            user_to_resolve = m_from_id
+        elif (isinstance(m.peer_id, PeerUser)
+              and str(m_from_id) == str(bot.id)
+              and m_chat_id and str(m_chat_id) != str(bot.id)):
+            user_to_resolve = m_chat_id
 
-    if user_to_resolve and user_to_resolve not in all_users:
-        await discover_user(bot, user_to_resolve)
+        if user_to_resolve and user_to_resolve not in all_users:
+            await discover_user(bot, user_to_resolve)
+    except Exception as e:
+        msg_id = getattr(m, 'id', None)
+        try:
+            chat_id = get_chat_id(m, bot.id)
+        except Exception:
+            chat_id = getattr(m, 'chat_id', None)
+        print(f"Error processing message id={msg_id} chat={chat_id}: {str(e)}")
 
     return False
 
