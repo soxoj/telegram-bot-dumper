@@ -602,3 +602,56 @@ async def test_pinned_service_message_names_the_pinned_message():
     await dumper.process_message(FakeBot(), _service_message(MessageActionPinMessage(), reply_to))
 
     assert _history_line().endswith("Pinned message 17")
+
+@pytest.mark.asyncio
+async def test_safe_process_message_skips_bad_message_and_keeps_dumping(monkeypatch, capsys):
+    """One message that raises must not abort a history batch (#50)."""
+    good1 = SimpleNamespace(
+        id=1, peer_id=PeerUser(user_id=10), from_id=PeerUser(user_id=10), to_id=None,
+        date="2026-09-27 12:00:00", media=None, message="hello", action=None, reply_to=None,
+    )
+    bad = SimpleNamespace(
+        id=2, peer_id=PeerUser(user_id=10), from_id=PeerUser(user_id=10), to_id=None,
+        date="2026-09-27 12:00:01", media=object(), message="", action=None, reply_to=None,
+    )
+    good2 = SimpleNamespace(
+        id=3, peer_id=PeerUser(user_id=10), from_id=PeerUser(user_id=10), to_id=None,
+        date="2026-09-27 12:00:02", media=None, message="world", action=None, reply_to=None,
+    )
+
+    real_process = dumper.process_message
+
+    async def exploding(bot, m, empty_message_counter=0):
+        if m.id == 2:
+            raise AttributeError("ReplyKeyboardHide has no rows")
+        return await real_process(bot, m, empty_message_counter)
+
+    monkeypatch.setattr(dumper, "process_message", exploding)
+
+    bot = FakeBot()
+    for m in (good1, bad, good2):
+        result = await dumper.safe_process_message(bot, m)
+        assert result is False
+
+    (chat,) = dumper.messages_by_chat.values()
+    texts = " ".join(chat["buf"])
+    assert "hello" in texts
+    assert "world" in texts
+    assert "ReplyKeyboardHide" not in texts
+
+    err = capsys.readouterr().out
+    assert "Error processing message 2" in err
+    assert "chat 10" in err
+    assert "ReplyKeyboardHide has no rows" in err
+
+
+@pytest.mark.asyncio
+async def test_safe_process_message_reraises_keyboardinterrupt(monkeypatch):
+    async def boom(bot, m, empty_message_counter=0):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(dumper, "process_message", boom)
+    m = SimpleNamespace(id=9, peer_id=PeerUser(user_id=1))
+    with pytest.raises(KeyboardInterrupt):
+        await dumper.safe_process_message(FakeBot(), m)
+

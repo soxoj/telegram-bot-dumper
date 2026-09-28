@@ -300,6 +300,28 @@ def describe_service_action(action, from_id=None, reply_to_msg_id=None):
     return str(action)
 
 
+async def safe_process_message(bot, m, empty_message_counter=0):
+    """Process one message; log and skip on parse errors so a dump can continue.
+
+    KeyboardInterrupt and asyncio.CancelledError are re-raised so Ctrl+C still
+    stops the dump. Returns False when the message could not be processed, so
+    history loops treat it as a non-empty message and keep going.
+    """
+    try:
+        return await process_message(bot, m, empty_message_counter)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
+    except Exception as e:
+        msg_id = getattr(m, 'id', '?')
+        chat_id = '?'
+        try:
+            chat_id = get_chat_id(m, getattr(bot, 'id', None))
+        except Exception:
+            pass
+        print(f'Error processing message {msg_id} in chat {chat_id}: {e}')
+        return False
+
+
 async def process_message(bot, m, empty_message_counter=0):
     m_chat_id = get_chat_id(m, bot.id)
     m_from_id = get_from_id(m, bot.id)
@@ -478,7 +500,7 @@ async def get_chat_history(bot, from_id=0, to_id=0, chat_id=None, lookahead=0):
     empty_message_counter = 0
     history_tail = True
     for m in messages.messages:
-        is_empty = await process_message(bot, m, empty_message_counter)
+        is_empty = await safe_process_message(bot, m, empty_message_counter)
         if is_empty:
             empty_message_counter += 1
         else:
@@ -521,7 +543,7 @@ async def get_chat_history_down(bot, from_id, lookahead=0):
     empty_message_counter = 0
     found_real = False
     for m in messages.messages:
-        is_empty = await process_message(bot, m, empty_message_counter)
+        is_empty = await safe_process_message(bot, m, empty_message_counter)
         if is_empty:
             empty_message_counter += 1
         else:
@@ -625,7 +647,7 @@ async def main(args):
                 save_user_info(sender)
                 await save_user_photos(bot, sender)
 
-        await process_message(bot, event.message)
+        await safe_process_message(bot, event.message)
 
         if offer_state['pending'] and not offer_state['in_flight']:
             offer_state['in_flight'] = True
