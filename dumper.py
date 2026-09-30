@@ -50,6 +50,7 @@ LOOKAHEAD_STEP_COUNT = 0
 all_chats = {}
 all_users = {}
 messages_by_chat = {}
+message_counts_by_chat = {}
 base_path = ''
 NO_PHOTOS = False
 USERS_CSV = False
@@ -209,6 +210,44 @@ def save_chats_text_history():
         save_text_history(m_chat_id, new_messages)
         messages_by_chat[m_chat_id]['history'] += new_messages
         messages_by_chat[m_chat_id]['buf'] = []
+
+
+def get_dump_summary():
+    chat_ids = {str(chat_id) for chat_id in all_chats}
+    chat_ids.update(str(chat_id) for chat_id in messages_by_chat)
+    chat_ids.update(str(chat_id) for chat_id in message_counts_by_chat)
+    user_ids = {str(user_id) for user_id in all_users}
+    message_count = sum(message_counts_by_chat.values())
+    if not message_counts_by_chat:
+        message_count = sum(
+            len(messages.get('history', [])) + len(messages.get('buf', []))
+            for messages in messages_by_chat.values()
+        )
+
+    media_count = 0
+    if os.path.isdir(base_path):
+        for root, _, filenames in os.walk(base_path):
+            relative_parts = os.path.relpath(root, base_path).split(os.sep)
+            in_media_dir = 'media' in relative_parts
+            for filename in filenames:
+                if in_media_dir:
+                    media_count += 1
+                elif root != base_path and not (
+                    filename.endswith('.json')
+                    or filename.endswith('_history.txt')
+                    or filename in ('users.csv', 'last_message_id.txt')
+                ):
+                    media_count += 1
+
+    return len(chat_ids), len(user_ids), message_count, media_count
+
+
+def print_dump_summary():
+    chat_count, user_count, message_count, media_count = get_dump_summary()
+    print(
+        f'Done: {chat_count} chats, {user_count} users, '
+        f'{message_count} messages, {media_count} media files'
+    )
 
 
 def get_chat_id(message, bot_id):
@@ -438,6 +477,7 @@ async def process_message(bot, m, empty_message_counter=0):
         if not m_chat_id in messages_by_chat:
             messages_by_chat[m_chat_id] = {'buf': [], 'history': []}
         messages_by_chat[m_chat_id]['buf'].append(text)
+    message_counts_by_chat[m_chat_id] = message_counts_by_chat.get(m_chat_id, 0) + 1
 
     if ON_MESSAGE:
         ON_MESSAGE(m_chat_id, text)
@@ -559,6 +599,7 @@ async def offer_downward_dump(bot, message_id, lookahead):
     )
     if answer.strip().lower() in ('', 'y', 'yes'):
         await get_chat_history_down(bot, from_id=message_id + 1, lookahead=lookahead)
+        print_dump_summary()
         print('Downward dump finished. Continuing to listen for new messages...')
         return True
     print(f'Skipped. You can rerun later with: --start-from-id {message_id}')
@@ -607,6 +648,7 @@ async def main(args):
     bot = await bot_auth(bot_token, proxy=proxy)
 
     offer_state = {'pending': args.listen_only, 'in_flight': False}
+    did_dump = bool(args.start_from_id) or not args.listen_only
 
     @bot.on(events.NewMessage)
     async def save_new_user_history(event):
@@ -650,6 +692,8 @@ async def main(args):
     else:
         await get_chat_history(bot, from_id=HISTORY_DUMP_STEP, to_id=0, lookahead=args.lookahead)
 
+    if did_dump:
+        print_dump_summary()
     print('Press Ctrl+C to stop listeting for new messages...')
     await bot.run_until_disconnected()
 
