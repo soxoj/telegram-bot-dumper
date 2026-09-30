@@ -21,6 +21,7 @@ def reset_module_state(monkeypatch, tmp_path):
     monkeypatch.setattr(dumper, "all_chats", {})
     monkeypatch.setattr(dumper, "all_users", {})
     monkeypatch.setattr(dumper, "messages_by_chat", {})
+    monkeypatch.setattr(dumper, "message_counts_by_chat", {})
     monkeypatch.setattr(dumper, "NO_PHOTOS", False)
     monkeypatch.setattr(dumper, "USERS_CSV", False)
     monkeypatch.setattr(dumper, "NO_MEDIA", False)
@@ -217,6 +218,62 @@ def test_save_chats_text_history_skips_empty_buf(monkeypatch, tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+# ---------- dump summary ----------
+
+def test_get_dump_summary_empty():
+    assert dumper.get_dump_summary() == (0, 0, 0, 0)
+
+
+def test_get_dump_summary_counts_in_memory_state_and_media(monkeypatch, tmp_path):
+    monkeypatch.setattr(dumper, "all_chats", {100: object(), 200: object()})
+    monkeypatch.setattr(dumper, "all_users", {1: object(), 2: object()})
+    monkeypatch.setattr(
+        dumper,
+        "messages_by_chat",
+        {
+            "100": {"history": ["first", "second"], "buf": ["third"]},
+            "300": {"history": ["fourth"], "buf": []},
+        },
+    )
+    monkeypatch.setattr(dumper, "message_counts_by_chat", {"100": 3, "300": 1})
+
+    first_media_dir = tmp_path / "100" / "media"
+    first_media_dir.mkdir(parents=True)
+    (first_media_dir / "photo.jpg").write_bytes(b"photo")
+    (tmp_path / "100" / "profile.jpg").write_bytes(b"profile")
+    nested_media_dir = tmp_path / "300" / "media" / "documents"
+    nested_media_dir.mkdir(parents=True)
+    (nested_media_dir / "report.pdf").write_bytes(b"document")
+    (tmp_path / "bot.json").write_text("{}")
+    (tmp_path / "100" / "100.json").write_text("{}")
+    (tmp_path / "100" / "100_history.txt").write_text("first\nsecond\n")
+
+    assert dumper.get_dump_summary() == (3, 2, 4, 3)
+
+
+def test_get_dump_summary_counts_messages_without_history(monkeypatch):
+    monkeypatch.setattr(dumper, "message_counts_by_chat", {"100": 2})
+    monkeypatch.setattr(dumper, "messages_by_chat", {})
+    assert dumper.get_dump_summary() == (1, 0, 2, 0)
+
+
+def test_get_dump_summary_falls_back_to_buffered_history(monkeypatch):
+    monkeypatch.setattr(dumper, "message_counts_by_chat", {})
+    monkeypatch.setattr(
+        dumper,
+        "messages_by_chat",
+        {"100": {"history": ["one"], "buf": ["two", "three"]}},
+    )
+    assert dumper.get_dump_summary() == (1, 0, 3, 0)
+
+
+def test_print_dump_summary(capsys):
+    dumper.print_dump_summary()
+    assert capsys.readouterr().out == (
+        "Done: 0 chats, 0 users, 0 messages, 0 media files\n"
+    )
+
+
 # ---------- process_message text format ----------
 
 def _message(message_id, from_peer, peer_id, text="hi"):
@@ -271,6 +328,7 @@ async def test_process_message_no_history_skips_buffer(monkeypatch):
     m = _message(5, PeerUser(user_id=42), PeerUser(user_id=42))
     await dumper.process_message(FakeBot(), m)
     assert dumper.messages_by_chat == {}
+    assert dumper.message_counts_by_chat == {"42": 1}
 
 
 @pytest.mark.asyncio
