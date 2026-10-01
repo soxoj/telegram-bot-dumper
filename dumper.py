@@ -130,6 +130,22 @@ async def safe_api_request(coroutine, comment):
     return result
 
 
+async def safe_process_message(bot, m, empty_message_counter=0):
+    """Process one message; log and skip on unexpected parse errors."""
+    try:
+        return await process_message(bot, m, empty_message_counter)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
+    except Exception as e:
+        msg_id = getattr(m, 'id', None)
+        try:
+            chat_id = get_chat_id(m, bot.id)
+        except Exception:
+            chat_id = getattr(m, 'chat_id', None)
+        print(f"Failed to process message id={msg_id} chat_id={chat_id}: {e}")
+        return False
+
+
 async def save_chat_photo(bot, chat):
     if NO_PHOTOS:
         return
@@ -478,7 +494,7 @@ async def get_chat_history(bot, from_id=0, to_id=0, chat_id=None, lookahead=0):
     empty_message_counter = 0
     history_tail = True
     for m in messages.messages:
-        is_empty = await process_message(bot, m, empty_message_counter)
+        is_empty = await safe_process_message(bot, m, empty_message_counter)
         if is_empty:
             empty_message_counter += 1
         else:
@@ -521,7 +537,7 @@ async def get_chat_history_down(bot, from_id, lookahead=0):
     empty_message_counter = 0
     found_real = False
     for m in messages.messages:
-        is_empty = await process_message(bot, m, empty_message_counter)
+        is_empty = await safe_process_message(bot, m, empty_message_counter)
         if is_empty:
             empty_message_counter += 1
         else:
@@ -625,7 +641,7 @@ async def main(args):
                 save_user_info(sender)
                 await save_user_photos(bot, sender)
 
-        await process_message(bot, event.message)
+        await safe_process_message(bot, event.message)
 
         if offer_state['pending'] and not offer_state['in_flight']:
             offer_state['in_flight'] = True
