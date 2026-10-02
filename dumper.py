@@ -565,21 +565,25 @@ async def offer_downward_dump(bot, message_id, lookahead):
     return False
 
 
-async def bot_auth(bot_token, proxy=None):
+async def bot_auth(bot_token, proxy=None, output_dir=None):
     # TODO: make not global
     global base_path
     bot_id = bot_token.split(':')[0]
-    base_path = bot_id
+    if output_dir:
+        base_path = os.path.join(output_dir, bot_id)
+    else:
+        base_path = bot_id
     if os.path.exists(base_path):
         import time
         new_path = f'{base_path}_{str(int(time.time()))}'
         os.rename(base_path, new_path)
         os.mkdir(base_path)
-        old_session = f'{new_path}/{base_path}.session'
+        old_session = os.path.join(new_path, f'{bot_id}.session')
+        new_session = os.path.join(base_path, f'{bot_id}.session')
         if os.path.exists(old_session):
-            shutil.copyfile(old_session, f'{base_path}/{base_path}.session')
+            shutil.copyfile(old_session, new_session)
     else:
-        os.mkdir(base_path)
+        os.makedirs(base_path, exist_ok=True)
 
     # advantages of Telethon using for bots: https://github.com/telegram-mtproto/botapi-comparison
     try:
@@ -595,7 +599,7 @@ async def bot_auth(bot_token, proxy=None):
     all_users[me.id] = user
     user_info = user.users[0].to_dict()
     user_info['token'] = bot_token
-    with open(os.path.join(bot_id, 'bot.json'), 'w') as bot_info_file:
+    with open(os.path.join(base_path, 'bot.json'), 'w') as bot_info_file:
         json.dump(user_info, bot_info_file, default=str)
 
     return bot
@@ -604,7 +608,7 @@ async def bot_auth(bot_token, proxy=None):
 async def main(args):
     proxy = (socks.SOCKS5, '127.0.0.1', 9050) if args.tor else None
     bot_token = args.token or input("Enter token bot: ")
-    bot = await bot_auth(bot_token, proxy=proxy)
+    bot = await bot_auth(bot_token, proxy=proxy, output_dir=args.output)
 
     offer_state = {'pending': args.listen_only, 'in_flight': False}
 
@@ -674,6 +678,7 @@ if __name__ == '__main__':
     parser.add_argument("--users-csv", help="Save users to a single users.csv instead of per-user JSON dirs",
                         action="store_true")
     parser.add_argument("--tor", help="enable Tor socks proxy", action="store_true")
+    parser.add_argument("--output", help="Directory to save the dump (default: ./<bot_id>)")
     args = parser.parse_args()
 
     NO_PHOTOS = args.no_photos

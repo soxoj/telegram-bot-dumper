@@ -7,6 +7,7 @@ exists but contains no .session file (the bug from GitHub issue
 import os
 import shutil
 import tempfile
+
 import pytest
 
 from dumper import bot_auth
@@ -75,6 +76,63 @@ async def test_bot_auth_existing_session_file_is_copied(monkeypatch):
 
     # The session file should have been copied to the new directory.
     new_session = os.path.join(bot_id, f"{bot_id}.session")
+    assert os.path.isfile(new_session)
+    with open(new_session) as f:
+        assert f.read() == "session-data"
+
+
+@pytest.mark.asyncio
+async def test_bot_auth_with_custom_output_dir(monkeypatch):
+    """bot_auth with output_dir should create output_dir/bot_id."""
+    bot_id = "987654321"
+    fake_token = f"{bot_id}:AAFakeTokenValue"
+    custom_output = "custom_dumps"
+    custom_path = os.path.join(custom_output, bot_id)
+
+    class _FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def start(self, **kw):
+            raise KeyboardInterrupt("stop before real network call")
+
+    monkeypatch.setattr("dumper.TelegramClient", _FakeClient)
+
+    with pytest.raises(KeyboardInterrupt):
+        await bot_auth(fake_token, output_dir=custom_output)
+
+    assert os.path.isdir(os.path.join(custom_output, bot_id))
+    assert not os.path.exists(bot_id)
+
+@pytest.mark.asyncio
+async def test_bot_auth_custom_output_dir_rotation(monkeypatch):
+    """When previous dump exists in output_dir, it should be rotated and session preserved."""
+    bot_id = "987654321"
+    fake_token = f"{bot_id}:AAFakeTokenValue"
+    custom_output = "custom_dumps"
+    custom_path = os.path.join(custom_output, bot_id)
+
+    os.makedirs(custom_path, exist_ok=True)
+    session_path = os.path.join(custom_path, f"{bot_id}.session")
+    with open(session_path, "w") as f:
+        f.write("session-data")
+
+    class _FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def start(self, **kw):
+            raise KeyboardInterrupt("stop before real network call")
+
+    monkeypatch.setattr("dumper.TelegramClient", _FakeClient)
+
+    with pytest.raises(KeyboardInterrupt):
+        await bot_auth(fake_token, output_dir=custom_output)
+
+    entries = os.listdir(custom_output)
+    assert len(entries) == 2
+
+    new_session = os.path.join(custom_path, f"{bot_id}.session")
     assert os.path.isfile(new_session)
     with open(new_session) as f:
         assert f.read() == "session-data"
