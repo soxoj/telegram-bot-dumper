@@ -30,6 +30,10 @@
   #side header{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)}
   #side header .title{font-weight:600}
   #side header .sub{color:var(--muted);font-size:12px}
+  #side header .grow{flex:1;min-width:0}
+  .iconbtn{border:1px solid var(--border);background:#fff;color:var(--blue);border-radius:9px;padding:7px 10px;
+    font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .iconbtn:hover{background:var(--hover)}
   #list{overflow-y:auto;flex:1}
   .row{display:flex;gap:12px;padding:10px 14px;cursor:pointer;align-items:center;border-bottom:1px solid #f2f2f2}
   .row:hover{background:var(--hover)}
@@ -119,8 +123,9 @@
   <aside id="side">
     <header>
       <span id="botav"></span>
-      <div><div class="title" id="botname"></div>
+      <div class="grow"><div class="title" id="botname"></div>
         <div class="sub"><span id="botsub"></span><span id="livebadge" class="live"></span></div></div>
+      <button id="export-links" class="iconbtn" type="button" title="Download all links as CSV">Export links</button>
     </header>
     <div id="searchbar"><input id="q" type="search" placeholder="Search messages" autocomplete="off" spellcheck="false"></div>
     <div id="list"></div>
@@ -317,6 +322,10 @@ function startLive(){
   fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN})})
     .then(r=>r.json()).then(r=>{ if(r.error){ LIVE_STATUS='✗ '+r.error; paintLive(); } }).catch(()=>{});
 }
+function exportLinks(){
+  if(!BOT) return;
+  window.location.href = '/api/links.csv?bot='+encodeURIComponent(BOT.botId);
+}
 function mediaNode(chat, name){
   const url=fileUrl(chat,'media/'+name);
   const ext=(name.split('.').pop()||'').toLowerCase();
@@ -431,6 +440,7 @@ document.addEventListener('keydown',e=>{
 });
 
 $('#lb').addEventListener('click',()=>{ $('#lb').style.display='none'; });
+$('#export-links').addEventListener('click',exportLinks);
 $('#go').addEventListener('click',doLogin);
 $('#token').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
 const saved = localStorage.getItem('tgv_token');
