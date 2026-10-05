@@ -602,3 +602,48 @@ async def test_pinned_service_message_names_the_pinned_message():
     await dumper.process_message(FakeBot(), _service_message(MessageActionPinMessage(), reply_to))
 
     assert _history_line().endswith("Pinned message 17")
+
+# ---------- safe_process_message / dump resilience (#50) ----------
+
+@pytest.mark.asyncio
+async def test_history_dump_skips_one_bad_message(monkeypatch, capsys):
+    """One parse failure must not abort the rest of the batch."""
+    monkeypatch.setattr(dumper, "all_users", {"42": object(), "7": object()})
+
+    good_a = _message(1, PeerUser(user_id=42), PeerUser(user_id=42), text="first")
+    bad = _message(2, PeerUser(user_id=42), PeerUser(user_id=42), text="boom")
+    good_b = _message(3, PeerUser(user_id=7), PeerUser(user_id=7), text="third")
+
+    real = dumper.process_message
+
+    async def exploding(bot, m, empty_message_counter=0):
+        if getattr(m, "id", None) == 2:
+            raise AttributeError("'ReplyKeyboardHide' object has no attribute 'rows'")
+        return await real(bot, m, empty_message_counter)
+
+    monkeypatch.setattr(dumper, "process_message", exploding)
+
+    bot = FakeBot(response=SimpleNamespace(messages=[good_a, bad, good_b]))
+    await dumper.get_chat_history(bot, from_id=4, to_id=1)
+
+    out = capsys.readouterr().out
+    assert "Failed to process message id=2" in out
+    assert "chat_id=" in out
+    assert "ReplyKeyboardHide" in out or "rows" in out
+    hist_42 = dumper.messages_by_chat.get("42", {}).get("history", [])
+    hist_7 = dumper.messages_by_chat.get("7", {}).get("history", [])
+    assert any("first" in line for line in hist_42)
+    assert any("third" in line for line in hist_7)
+    assert not any("boom" in line for line in hist_42 + hist_7)
+
+
+@pytest.mark.asyncio
+async def test_safe_process_message_rethrows_cancelled_error(monkeypatch):
+    import asyncio as aio
+
+    async def boom(bot, m, empty_message_counter=0):
+        raise aio.CancelledError()
+
+    monkeypatch.setattr(dumper, "process_message", boom)
+    with pytest.raises(aio.CancelledError):
+        await dumper.safe_process_message(FakeBot(), SimpleNamespace(id=9, chat_id=1))
