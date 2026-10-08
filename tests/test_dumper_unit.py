@@ -248,7 +248,7 @@ def test_get_dump_summary_counts_in_memory_state_and_media(monkeypatch, tmp_path
     (tmp_path / "100" / "100.json").write_text("{}")
     (tmp_path / "100" / "100_history.txt").write_text("first\nsecond\n")
 
-    assert dumper.get_dump_summary() == (3, 2, 4, 3)
+    assert dumper.get_dump_summary() == (2, 2, 4, 3)
 
 
 def test_get_dump_summary_counts_messages_without_history(monkeypatch):
@@ -257,14 +257,15 @@ def test_get_dump_summary_counts_messages_without_history(monkeypatch):
     assert dumper.get_dump_summary() == (1, 0, 2, 0)
 
 
-def test_get_dump_summary_falls_back_to_buffered_history(monkeypatch):
-    monkeypatch.setattr(dumper, "message_counts_by_chat", {})
+def test_get_dump_summary_does_not_double_count_marked_chat_id(monkeypatch):
+    monkeypatch.setattr(dumper, "all_chats", {-1001234567: object()})
     monkeypatch.setattr(
         dumper,
         "messages_by_chat",
-        {"100": {"history": ["one"], "buf": ["two", "three"]}},
+        {"1234567": {"history": ["one"], "buf": []}},
     )
-    assert dumper.get_dump_summary() == (1, 0, 3, 0)
+    monkeypatch.setattr(dumper, "message_counts_by_chat", {"1234567": 1})
+    assert dumper.get_dump_summary() == (1, 0, 1, 0)
 
 
 def test_print_dump_summary(capsys):

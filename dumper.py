@@ -213,16 +213,8 @@ def save_chats_text_history():
 
 
 def get_dump_summary():
-    chat_ids = {str(chat_id) for chat_id in all_chats}
-    chat_ids.update(str(chat_id) for chat_id in messages_by_chat)
-    chat_ids.update(str(chat_id) for chat_id in message_counts_by_chat)
     user_ids = {str(user_id) for user_id in all_users}
     message_count = sum(message_counts_by_chat.values())
-    if not message_counts_by_chat:
-        message_count = sum(
-            len(messages.get('history', [])) + len(messages.get('buf', []))
-            for messages in messages_by_chat.values()
-        )
 
     media_count = 0
     if os.path.isdir(base_path):
@@ -239,7 +231,7 @@ def get_dump_summary():
                 ):
                     media_count += 1
 
-    return len(chat_ids), len(user_ids), message_count, media_count
+    return len(message_counts_by_chat), len(user_ids), message_count, media_count
 
 
 def print_dump_summary():
