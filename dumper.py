@@ -18,7 +18,7 @@ from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.types import MessageService, MessageEmpty, User
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel
-from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailError
+from telethon.errors.rpcerrorlist import AccessTokenExpiredError, AccessTokenInvalidError, RpcCallFailError
 from telethon.tl.types import (
     MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact,
     MessageMediaPoll, MessageMediaVenue, MessageMediaDice, MessageMediaGame,
@@ -318,15 +318,13 @@ async def process_message(bot, m, empty_message_counter=0):
 
     if m.media:
         if isinstance(m.media, MessageMediaGeo):
-            message_text = f'Geoposition: {m.media.geo.lat}, {m.media.geo.long}'
+            message_text = f'Geoposition: {m.media.geo.long}, {m.media.geo.lat}'
         elif isinstance(m.media, MessageMediaPhoto):
             if not NO_MEDIA:
                 await save_media_photo(bot, m_chat_id, m.media.photo)
             message_text = f'Photo: media/{m.media.photo.id}.jpg'
         elif isinstance(m.media, MessageMediaContact):
-            message_text = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}'
-            if m.media.vcard:
-                message_text += f', rawdata {m.media.vcard}'
+            message_text = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}, rawdata {m.media.vcard}'
         elif isinstance(m.media, MessageMediaDocument):
             if NO_MEDIA:
                 filename = get_document_filename(m.media.document) or f'{m.media.document.id}'
@@ -388,7 +386,7 @@ async def process_message(bot, m, empty_message_counter=0):
         elif isinstance(m.media, MessageMediaGeoLive):
             geo = getattr(m.media, 'geo', None)
             period = getattr(m.media, 'period', None)
-            geo_str = f'{geo.lat}, {geo.long}' if geo and hasattr(geo, 'long') and hasattr(geo, 'lat') else ''
+            geo_str = f'{geo.long}, {geo.lat}' if geo and hasattr(geo, 'long') and hasattr(geo, 'lat') else ''
             if geo_str and period:
                 message_text = f'Live geoposition: {geo_str} (period: {period}s)'
             elif geo_str:
@@ -575,25 +573,30 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
         base_path = os.path.join(output_dir, bot_id)
     else:
         base_path = bot_id
+    created_this_run = False
     if os.path.exists(base_path):
         import time
         new_path = f'{base_path}_{str(int(time.time()))}'
         os.rename(base_path, new_path)
         os.mkdir(base_path)
+        created_this_run = True
         old_session = os.path.join(new_path, f'{bot_id}.session')
         new_session = os.path.join(base_path, f'{bot_id}.session')
         if os.path.exists(old_session):
             shutil.copyfile(old_session, new_session)
     else:
         os.makedirs(base_path, exist_ok=True)
+        created_this_run = True
 
     # advantages of Telethon using for bots: https://github.com/telegram-mtproto/botapi-comparison
     try:
         bot = await TelegramClient(os.path.join(base_path, bot_id), API_ID, API_HASH, proxy=proxy).start(bot_token=bot_token)
         bot.id = bot_id
-    except AccessTokenExpiredError as e:
-        print("Token has expired!")
-        sys.exit()
+    except (AccessTokenExpiredError, AccessTokenInvalidError):
+        if created_this_run and os.path.exists(base_path):
+            shutil.rmtree(base_path)
+        print("Telegram rejected the token (invalid or revoked).")
+        sys.exit(1)
 
     me = await bot.get_me()
     print_bot_info(me)
@@ -608,11 +611,22 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
 
 
 async def main(args):
+    if not API_ID or not API_HASH:
+        print("API_ID and API_HASH are not set. Get them at https://my.telegram.org and export them (see README).")
+        sys.exit(1)
+
     proxy = (socks.SOCKS5, '127.0.0.1', 9050) if args.tor else None
-    bot_token = args.token or input("Enter token bot: ")
+    if args.token:
+        bot_token = args.token
+    else:
+        try:
+            bot_token = input("Enter token bot: ")
+        except EOFError:
+            print("No token given: pass --token, or run in a terminal to type it.")
+            sys.exit(1)
     bot = await bot_auth(bot_token, proxy=proxy, output_dir=args.output)
 
-    offer_state = {'pending': args.listen_only}
+    offer_state = {'pending': args.listen_only, 'in_flight': False}
 
     @bot.on(events.NewMessage)
     async def save_new_user_history(event):
@@ -632,12 +646,15 @@ async def main(args):
                 await save_user_photos(bot, sender)
 
         await process_message(bot, event.message)
-        save_chats_text_history()
 
-        # offer once: a declined offer prints how to rerun with --start-from-id
-        if offer_state['pending']:
-            offer_state['pending'] = False
-            await offer_downward_dump(bot, event.message.id, args.lookahead)
+        if offer_state['pending'] and not offer_state['in_flight']:
+            offer_state['in_flight'] = True
+            try:
+                accepted = await offer_downward_dump(bot, event.message.id, args.lookahead)
+                if accepted:
+                    offer_state['pending'] = False
+            finally:
+                offer_state['in_flight'] = False
 
     if args.start_from_id:
         await get_chat_history_down(bot, from_id=args.start_from_id, lookahead=args.lookahead)
@@ -653,12 +670,11 @@ async def main(args):
     else:
         await get_chat_history(bot, from_id=HISTORY_DUMP_STEP, to_id=0, lookahead=args.lookahead)
 
-    print('Press Ctrl+C to stop listening for new messages...')
+    print('Press Ctrl+C to stop listeting for new messages...')
     await bot.run_until_disconnected()
 
 
 if __name__ == '__main__':
-    sys.stdout.reconfigure(line_buffering=True)  # logs show up under nohup/systemd
     parser = argparse.ArgumentParser()
     parser.add_argument("--token", help="Telegram bot token to check")
     parser.add_argument("--listen-only", help="Don't dump all the bot history", action="store_true")
