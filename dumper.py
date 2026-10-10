@@ -18,7 +18,7 @@ from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.types import MessageService, MessageEmpty, User
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel
-from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailError
+from telethon.errors.rpcerrorlist import AccessTokenExpiredError, AccessTokenInvalidError, RpcCallFailError
 from telethon.tl.types import (
     MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact,
     MessageMediaPoll, MessageMediaVenue, MessageMediaDice, MessageMediaGame,
@@ -570,6 +570,9 @@ async def offer_downward_dump(bot, message_id, lookahead):
 async def bot_auth(bot_token, proxy=None, output_dir=None):
     # TODO: make not global
     global base_path
+    if not API_ID or not API_HASH:
+        print("API_ID and API_HASH are not set. Get them at https://my.telegram.org and export them (see README).")
+        sys.exit(1)
     bot_id = bot_token.split(':')[0]
     if output_dir:
         base_path = os.path.join(output_dir, bot_id)
@@ -591,9 +594,14 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
     try:
         bot = await TelegramClient(os.path.join(base_path, bot_id), API_ID, API_HASH, proxy=proxy).start(bot_token=bot_token)
         bot.id = bot_id
-    except AccessTokenExpiredError as e:
+    except AccessTokenExpiredError:
         print("Token has expired!")
-        sys.exit()
+        shutil.rmtree(base_path, ignore_errors=True)
+        sys.exit(1)
+    except AccessTokenInvalidError:
+        print("Telegram rejected the token (invalid or revoked).")
+        shutil.rmtree(base_path, ignore_errors=True)
+        sys.exit(1)
 
     me = await bot.get_me()
     print_bot_info(me)
@@ -609,7 +617,11 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
 
 async def main(args):
     proxy = (socks.SOCKS5, '127.0.0.1', 9050) if args.tor else None
-    bot_token = args.token or input("Enter token bot: ")
+    try:
+        bot_token = args.token or input("Enter token bot: ")
+    except EOFError:
+        print("No token given: pass --token, or run in a terminal to type it.")
+        sys.exit(1)
     bot = await bot_auth(bot_token, proxy=proxy, output_dir=args.output)
 
     offer_state = {'pending': args.listen_only}
