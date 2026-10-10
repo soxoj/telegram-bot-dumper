@@ -318,13 +318,15 @@ async def process_message(bot, m, empty_message_counter=0):
 
     if m.media:
         if isinstance(m.media, MessageMediaGeo):
-            message_text = f'Geoposition: {m.media.geo.long}, {m.media.geo.lat}'
+            message_text = f'Geoposition: {m.media.geo.lat}, {m.media.geo.long}'
         elif isinstance(m.media, MessageMediaPhoto):
             if not NO_MEDIA:
                 await save_media_photo(bot, m_chat_id, m.media.photo)
             message_text = f'Photo: media/{m.media.photo.id}.jpg'
         elif isinstance(m.media, MessageMediaContact):
-            message_text = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}, rawdata {m.media.vcard}'
+            message_text = f'Vcard: phone {m.media.phone_number}, {m.media.first_name} {m.media.last_name}'
+            if m.media.vcard:
+                message_text += f', rawdata {m.media.vcard}'
         elif isinstance(m.media, MessageMediaDocument):
             if NO_MEDIA:
                 filename = get_document_filename(m.media.document) or f'{m.media.document.id}'
@@ -386,7 +388,7 @@ async def process_message(bot, m, empty_message_counter=0):
         elif isinstance(m.media, MessageMediaGeoLive):
             geo = getattr(m.media, 'geo', None)
             period = getattr(m.media, 'period', None)
-            geo_str = f'{geo.long}, {geo.lat}' if geo and hasattr(geo, 'long') and hasattr(geo, 'lat') else ''
+            geo_str = f'{geo.lat}, {geo.long}' if geo and hasattr(geo, 'long') and hasattr(geo, 'lat') else ''
             if geo_str and period:
                 message_text = f'Live geoposition: {geo_str} (period: {period}s)'
             elif geo_str:
@@ -610,7 +612,7 @@ async def main(args):
     bot_token = args.token or input("Enter token bot: ")
     bot = await bot_auth(bot_token, proxy=proxy, output_dir=args.output)
 
-    offer_state = {'pending': args.listen_only, 'in_flight': False}
+    offer_state = {'pending': args.listen_only}
 
     @bot.on(events.NewMessage)
     async def save_new_user_history(event):
@@ -630,15 +632,12 @@ async def main(args):
                 await save_user_photos(bot, sender)
 
         await process_message(bot, event.message)
+        save_chats_text_history()
 
-        if offer_state['pending'] and not offer_state['in_flight']:
-            offer_state['in_flight'] = True
-            try:
-                accepted = await offer_downward_dump(bot, event.message.id, args.lookahead)
-                if accepted:
-                    offer_state['pending'] = False
-            finally:
-                offer_state['in_flight'] = False
+        # offer once: a declined offer prints how to rerun with --start-from-id
+        if offer_state['pending']:
+            offer_state['pending'] = False
+            await offer_downward_dump(bot, event.message.id, args.lookahead)
 
     if args.start_from_id:
         await get_chat_history_down(bot, from_id=args.start_from_id, lookahead=args.lookahead)
@@ -654,11 +653,12 @@ async def main(args):
     else:
         await get_chat_history(bot, from_id=HISTORY_DUMP_STEP, to_id=0, lookahead=args.lookahead)
 
-    print('Press Ctrl+C to stop listeting for new messages...')
+    print('Press Ctrl+C to stop listening for new messages...')
     await bot.run_until_disconnected()
 
 
 if __name__ == '__main__':
+    sys.stdout.reconfigure(line_buffering=True)  # logs show up under nohup/systemd
     parser = argparse.ArgumentParser()
     parser.add_argument("--token", help="Telegram bot token to check")
     parser.add_argument("--listen-only", help="Don't dump all the bot history", action="store_true")
