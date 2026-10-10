@@ -15,6 +15,8 @@ def reset_module_state(monkeypatch, tmp_path):
     for name in ("all_chats", "all_users", "messages_by_chat"):
         monkeypatch.setattr(dumper, name, {})
     monkeypatch.setattr(dumper, "NO_HISTORY", False)
+    monkeypatch.setattr(dumper, "API_ID", 123456)
+    monkeypatch.setattr(dumper, "API_HASH", "abc123hash")
 
 
 class FakeBot:
