@@ -621,3 +621,60 @@ async def test_pinned_service_message_names_the_pinned_message():
     await dumper.process_message(FakeBot(), _service_message(MessageActionPinMessage(), reply_to))
 
     assert _history_line().endswith("Pinned message 17")
+
+
+def test_parse_args_no_listen():
+    args = dumper.parse_args(["--token", "123:abc", "--no-listen"])
+    assert args.no_listen is True
+    assert args.listen_only is False
+
+
+def test_parse_args_listen_only_and_no_listen_rejected():
+    with pytest.raises(SystemExit):
+        dumper.parse_args(["--token", "123:abc", "--listen-only", "--no-listen"])
+
+
+@pytest.mark.asyncio
+async def test_main_exits_early_on_no_listen(monkeypatch, tmp_path):
+    disconnect_called = []
+    run_until_disconnected_called = []
+
+    class DummyBot(FakeBot):
+        def __init__(self):
+            super().__init__(response=SimpleNamespace(users=[SimpleNamespace(to_dict=lambda: {})]))
+
+        async def get_me(self):
+            return SimpleNamespace(id=999)
+
+        def on(self, event):
+            return lambda fn: fn
+
+        async def disconnect(self):
+            disconnect_called.append(True)
+
+        async def run_until_disconnected(self):
+            run_until_disconnected_called.append(True)
+
+    class DummyClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def start(self, **kw):
+            return DummyBot()
+
+    async def fake_get_chat_history(*a, **kw):
+        return None
+
+    monkeypatch.setattr(dumper, "TelegramClient", DummyClient)
+    monkeypatch.setattr(dumper, "print_bot_info", lambda me: None)
+    monkeypatch.setattr(dumper, "get_chat_history", fake_get_chat_history)
+
+    args = SimpleNamespace(
+        tor=False, token='999:fake', output=str(tmp_path), listen_only=False,
+        start_from_id=0, down=False, lookahead=0, no_listen=True
+    )
+    await dumper.main(args)
+
+    assert disconnect_called == [True]
+    assert run_until_disconnected_called == []
+
