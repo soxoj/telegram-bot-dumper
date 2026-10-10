@@ -17,6 +17,10 @@ from dumper import bot_auth
 def use_tmp_dir(monkeypatch, tmp_path):
     """Run each test inside an isolated temporary directory."""
     monkeypatch.chdir(tmp_path)
+    # bot_auth refuses to run without these, and these tests are about the session
+    # files rather than the credentials, so give it a pair to get past the check.
+    monkeypatch.setattr("dumper.API_ID", 123456)
+    monkeypatch.setattr("dumper.API_HASH", "abcdef0123456789")
 
 
 @pytest.mark.asyncio
