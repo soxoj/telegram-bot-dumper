@@ -653,12 +653,18 @@ async def main(args):
     else:
         await get_chat_history(bot, from_id=HISTORY_DUMP_STEP, to_id=0, lookahead=args.lookahead)
 
+    if getattr(args, 'no_listen', False):
+        if hasattr(bot, 'disconnect'):
+            res = bot.disconnect()
+            if asyncio.iscoroutine(res):
+                await res
+        return
+
     print('Press Ctrl+C to stop listening for new messages...')
     await bot.run_until_disconnected()
 
 
-if __name__ == '__main__':
-    sys.stdout.reconfigure(line_buffering=True)  # logs show up under nohup/systemd
+def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--token", help="Telegram bot token to check")
     parser.add_argument("--listen-only", help="Don't dump all the bot history", action="store_true")
@@ -679,7 +685,22 @@ if __name__ == '__main__':
                         action="store_true")
     parser.add_argument("--tor", help="enable Tor socks proxy", action="store_true")
     parser.add_argument("--output", help="Directory to save the dump (default: ./<bot_id>)")
-    args = parser.parse_args()
+    parser.add_argument("--no-listen", help="Exit after dumping history instead of listening for new messages",
+                        action="store_true")
+    return parser
+
+
+def parse_args(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.listen_only and args.no_listen:
+        parser.error("Cannot combine --listen-only with --no-listen")
+    return args
+
+
+if __name__ == '__main__':
+    sys.stdout.reconfigure(line_buffering=True)  # logs show up under nohup/systemd
+    args = parse_args()
 
     NO_PHOTOS = args.no_photos
     USERS_CSV = args.users_csv

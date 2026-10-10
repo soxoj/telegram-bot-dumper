@@ -79,7 +79,7 @@ export API_HASH=abc...
 
 ### Quick start — full dump (default behavior)
 
-Walks ids 1..∞ upwards in batches of 200, downloading every message, all media, and all user profile photos.
+Walks ids 1..∞ upwards in batches of 200, downloading every message, all media, and all user profile photos. By default, the dumper keeps listening for new incoming messages after the dump finishes. To exit immediately after history dumping (ideal for scripts and cron jobs), pass `--no-listen`.
 
 ```sh
 ./dumper.py --token 12345678:ABCe2rPVteUWZ7wLeCqCb3CH3ilUY_fLabc
