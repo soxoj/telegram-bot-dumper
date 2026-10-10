@@ -600,7 +600,14 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
         base_path = os.path.join(output_dir, bot_id)
     else:
         base_path = bot_id
-    if os.path.exists(base_path):
+    if not os.path.exists(base_path):
+        os.makedirs(base_path, exist_ok=True)
+        # True only when the directory itself is new. An invalid token removes the
+        # empty directory this run created, and only that one: a dump rotated to
+        # <bot_id>_<timestamp> is the user's data, and it is left where it is.
+        created_now = True
+    else:
+        created_now = False
         import time
         new_path = f'{base_path}_{str(int(time.time()))}'
         os.rename(base_path, new_path)
@@ -609,8 +616,6 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
         new_session = os.path.join(base_path, f'{bot_id}.session')
         if os.path.exists(old_session):
             shutil.copyfile(old_session, new_session)
-    else:
-        os.makedirs(base_path, exist_ok=True)
 
     # advantages of Telethon using for bots: https://github.com/telegram-mtproto/botapi-comparison
     try:
@@ -622,6 +627,13 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
         print('ERROR: bot token has expired, it was revoked. Issue a new one with @BotFather and try again.')
         sys.exit(1)
     except AccessTokenInvalidError:
+        # Nothing useful is in the directory: the client never started, so the only
+        # file is the session Telethon made on the way to the failed login. Leaving
+        # it behind makes the next run rotate an empty dump and mistake the bot for
+        # a previously used one. Only the created directory is removed; a previous
+        # dump already rotated to <bot_id>_<timestamp> is left where it is.
+        if created_now:
+            shutil.rmtree(base_path, ignore_errors=True)
         print('ERROR: bot token is invalid or corrupted. Use: 123456789:AAAbbb...; check that you copied the whole string and the bot ID matches')
         sys.exit(1)
 

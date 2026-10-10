@@ -167,3 +167,62 @@ def test_ask_bot_token_exits_on_eof(monkeypatch, capsys):
 
     assert excinfo.value.code == 1
     assert "--token" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_invalid_token_removes_the_folder_this_run_created(monkeypatch, capsys):
+    """An invalid token leaves no empty <bot_id>/ with a session file behind."""
+    from telethon.errors.rpcerrorlist import AccessTokenInvalidError
+
+    class _FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def start(self, **kw):
+            # Telethon writes the session file before the login fails.
+            with open("123456789.session", "w") as f:
+                f.write("session-data")
+            raise AccessTokenInvalidError(None)
+
+    monkeypatch.setattr("dumper.TelegramClient", _FakeClient)
+    monkeypatch.setattr("dumper.API_ID", 123456)
+    monkeypatch.setattr("dumper.API_HASH", "abcdef0123456789")
+
+    with pytest.raises(SystemExit) as excinfo:
+        await bot_auth(GOOD_TOKEN)
+
+    assert excinfo.value.code == 1
+    assert "invalid" in capsys.readouterr().out
+    assert not os.path.exists("123456789"), "the folder this run created should be gone"
+
+
+@pytest.mark.asyncio
+async def test_invalid_token_leaves_a_rotated_previous_dump_alone(monkeypatch):
+    """A dump rotated to <bot_id>_<timestamp> is the user's data, not this run's litter."""
+    from telethon.errors.rpcerrorlist import AccessTokenInvalidError
+
+    bot_id = "123456789"
+    previous = f"{bot_id}_1789000000"
+    os.mkdir(previous)
+    with open(os.path.join(previous, f"{bot_id}_history.txt"), "w", encoding="utf-8") as f:
+        f.write("precious history\n")
+
+    class _FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def start(self, **kw):
+            raise AccessTokenInvalidError(None)
+
+    monkeypatch.setattr("dumper.TelegramClient", _FakeClient)
+    monkeypatch.setattr("dumper.API_ID", 123456)
+    monkeypatch.setattr("dumper.API_HASH", "abcdef0123456789")
+
+    with pytest.raises(SystemExit):
+        await bot_auth(GOOD_TOKEN)
+
+    kept = os.path.join(previous, f"{bot_id}_history.txt")
+    assert os.path.isfile(kept), "the previous dump should still be there, under its rotated name"
+    with open(kept, encoding="utf-8") as f:
+        assert f.read() == "precious history\n"
+    assert not os.path.exists(bot_id), "the empty folder this run created should be gone"
