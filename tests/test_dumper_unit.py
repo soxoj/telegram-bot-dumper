@@ -8,7 +8,7 @@ import pytest
 import dumper
 from telethon.tl.types import (
     PeerUser, PeerChat, PeerChannel,
-    MessageEmpty, MessageMediaPhoto,
+    MessageEmpty, MessageMediaPhoto, MessageMediaGeo, MessageMediaContact,
     MessageMediaPoll, MessageMediaVenue, MessageMediaDice, MessageMediaGame,
     MessageMediaInvoice, MessageMediaGeoLive, MessageMediaWebPage,
 )
@@ -384,7 +384,26 @@ async def test_process_message_media_geo_live(monkeypatch, capsys):
         period=900,
     )
     await dumper.process_message(FakeBot(), m)
-    assert "Live geoposition: 37.6176, 55.7558 (period: 900s)" in capsys.readouterr().out
+    assert "Live geoposition: 55.7558, 37.6176 (period: 900s)" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_geo_is_lat_long(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(17, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaGeo(geo=SimpleNamespace(long=2.2945, lat=48.8584))
+    await dumper.process_message(FakeBot(), m)
+    assert "Geoposition: 48.8584, 2.2945" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_contact_without_vcard(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(18, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaContact(phone_number="+10000000000", first_name="QA", last_name="Fake",
+                                  vcard="", user_id=0)
+    await dumper.process_message(FakeBot(), m)
+    assert capsys.readouterr().out.rstrip().endswith("Vcard: phone +10000000000, QA Fake")
 
 
 @pytest.mark.asyncio
