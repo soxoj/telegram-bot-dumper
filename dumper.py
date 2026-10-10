@@ -18,7 +18,7 @@ from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.types import MessageService, MessageEmpty, User
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel
-from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailError
+from telethon.errors.rpcerrorlist import AccessTokenExpiredError, AccessTokenInvalidError, RpcCallFailError
 from telethon.tl.types import (
     MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact,
     MessageMediaPoll, MessageMediaVenue, MessageMediaDice, MessageMediaGame,
@@ -37,6 +37,8 @@ from telethon.tl.types import (
 
 # Telegram API credentials from https://my.telegram.org — pass via env (or -e in Docker).
 # Never hard-code real values here: this file is public and git history is forever.
+# Left at their defaults here, so that importing this module does not fail on a machine
+# without credentials. bot_auth checks them before it reaches Telegram.
 API_ID = int(os.environ.get('API_ID') or 0)
 API_HASH = os.environ.get('API_HASH', '')
 
@@ -567,15 +569,45 @@ async def offer_downward_dump(bot, message_id, lookahead):
     return False
 
 
+def ask_bot_token():
+    # The interactive prompt used to accept a paste with a newline or a space and hand the
+    # mess to Telethon, which then failed somewhere further away. Ask again here instead,
+    # where the mistake is easy to name. EOF (piped input) ends the loop.
+    while True:
+        try:
+            token = input('Enter token bot: ').strip()
+        except EOFError:
+            print('ERROR: token was not provided, and there is no input to read. Pass it with --token')
+            sys.exit(1)
+        if ':' in token:
+            return token
+        print('ERROR: wrong format, use: 123456789:AAAbbb...; copying the whole line from @BotFather')
+
+
 async def bot_auth(bot_token, proxy=None, output_dir=None):
     # TODO: make not global
     global base_path
+    # Name the missing variable instead of letting Telethon fail on the "Telegram" host,
+    # which reads like a network or firewall problem.
+    if not API_ID or not API_HASH:
+        print('ERROR: API_ID and API_HASH are not set. Get them from https://my.telegram.org and pass them as environment variables, e.g. API_ID=123456 API_HASH=abcdef python dumper.py')
+        sys.exit(1)
+    if ':' not in bot_token:
+        print("ERROR: token must look like 123456:ABC-DEF...; check the value passed")
+        sys.exit(1)
     bot_id = bot_token.split(':')[0]
     if output_dir:
         base_path = os.path.join(output_dir, bot_id)
     else:
         base_path = bot_id
-    if os.path.exists(base_path):
+    if not os.path.exists(base_path):
+        os.makedirs(base_path, exist_ok=True)
+        # True only when the directory itself is new. An invalid token removes the
+        # empty directory this run created, and only that one: a dump rotated to
+        # <bot_id>_<timestamp> is the user's data, and it is left where it is.
+        created_now = True
+    else:
+        created_now = False
         import time
         new_path = f'{base_path}_{str(int(time.time()))}'
         os.rename(base_path, new_path)
@@ -584,16 +616,26 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
         new_session = os.path.join(base_path, f'{bot_id}.session')
         if os.path.exists(old_session):
             shutil.copyfile(old_session, new_session)
-    else:
-        os.makedirs(base_path, exist_ok=True)
 
     # advantages of Telethon using for bots: https://github.com/telegram-mtproto/botapi-comparison
     try:
         bot = await TelegramClient(os.path.join(base_path, bot_id), API_ID, API_HASH, proxy=proxy).start(bot_token=bot_token)
         bot.id = bot_id
-    except AccessTokenExpiredError as e:
-        print("Token has expired!")
-        sys.exit()
+    except AccessTokenExpiredError:
+        # An expired token and an invalid one are neither the same mistake nor the same
+        # fix: revoked means the owner has to revoke and reissue, wrong means a typo.
+        print('ERROR: bot token has expired, it was revoked. Issue a new one with @BotFather and try again.')
+        sys.exit(1)
+    except AccessTokenInvalidError:
+        # Nothing useful is in the directory: the client never started, so the only
+        # file is the session Telethon made on the way to the failed login. Leaving
+        # it behind makes the next run rotate an empty dump and mistake the bot for
+        # a previously used one. Only the created directory is removed; a previous
+        # dump already rotated to <bot_id>_<timestamp> is left where it is.
+        if created_now:
+            shutil.rmtree(base_path, ignore_errors=True)
+        print('ERROR: bot token is invalid or corrupted. Use: 123456789:AAAbbb...; check that you copied the whole string and the bot ID matches')
+        sys.exit(1)
 
     me = await bot.get_me()
     print_bot_info(me)
@@ -609,7 +651,7 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
 
 async def main(args):
     proxy = (socks.SOCKS5, '127.0.0.1', 9050) if args.tor else None
-    bot_token = args.token or input("Enter token bot: ")
+    bot_token = args.token or ask_bot_token()
     bot = await bot_auth(bot_token, proxy=proxy, output_dir=args.output)
 
     offer_state = {'pending': args.listen_only}
