@@ -211,7 +211,7 @@ function fileUrl(chat, name){
   return '/file/'+BOT.botId+'/'+encodeURIComponent(chat)+'/'+name.split('/').map(encodeURIComponent).join('/');
 }
 const sortedChats = () => [...CHATS.values()].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-function updateBotSub(){ $('#botsub').textContent=(BOT.bot.username?'@'+BOT.bot.username+' · ':'')+CHATS.size+' chats'; }
+function updateBotSub(){ $('#botsub').textContent=(BOT.bot.username?'@'+BOT.bot.username+' · ':'')+CHATS.size+(CHATS.size===1?' chat':' chats'); }
 function render(){
   $('#login').style.display='none';
   $('#app').style.display='flex';
@@ -316,7 +316,7 @@ function startLive(){
     if(e.type==='message') onLiveMessage(e.chat, e.message);
     else if(e.type==='chat') onLiveChat(e.chat);
     else if(e.type==='status'){ LIVE_STATUS=e.status; paintLive(); }
-    else if(e.type==='error'){ console.warn('live:', e.error); }
+    else if(e.type==='error'){ console.warn('live:', e.error); $('#livebadge').title=e.error; }
   };
   es.onerror=()=>{ LIVE_STATUS='offline'; paintLive(); };
   fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN})})
