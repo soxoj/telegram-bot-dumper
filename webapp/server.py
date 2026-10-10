@@ -13,6 +13,8 @@ Read-only viewing is auth-free & local; add sessions if this leaves localhost.
 import os
 import re
 import sys
+import csv
+import io
 import json
 import queue
 import asyncio
@@ -31,6 +33,7 @@ HOST = os.environ.get('HOST', '127.0.0.1')  # set HOST=0.0.0.0 to expose (e.g. i
 # [id] [from_id][optional to:/from:/group:] ... [date] text...   (greedy middle backtracks to release the date bracket)
 MSG_RE = re.compile(r'^\[(\d+)\]((?:\[[^\]]*\])*)\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[^\]]*)\]\s?(.*)$')
 MEDIA_RE = re.compile(r'^(?:Photo|Document|Photo of chat was changed): media/(.+)$')
+URL_RE = re.compile(r'https?://[^\s<>()"\']+')
 USER_FIELDS = ('id', 'first_name', 'last_name', 'username', 'bot', 'premium', 'verified', 'scam', 'fake', 'phone')
 
 
@@ -163,6 +166,31 @@ def search_messages(bot_id, term, limit=300):
                             'id': m['id'], 'date': m['date'], 'text': m['text']})
     out.sort(key=lambda r: r['date'], reverse=True)
     return out[:limit]
+
+
+def iter_links(bot_id):
+    """Yield (link, sender_id) rows for every URL found in a bot dump."""
+    root = os.path.join(DUMP_ROOT, bot_id)
+    if not os.path.isdir(root):
+        return
+    for name in sorted(os.listdir(root)):
+        d = os.path.join(root, name)
+        if not os.path.isdir(d):
+            continue
+        hist = os.path.join(d, f'{name}_history.txt')
+        if not os.path.isfile(hist):
+            continue
+        for msg in parse_history(hist, bot_id):
+            for link in URL_RE.findall(msg.get('text') or ''):
+                yield link.rstrip('.,;:!?]'), msg.get('from_id') or ''
+
+
+def links_csv(bot_id):
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator='\n')
+    writer.writerow(['link', 'sender_id'])
+    writer.writerows(iter_links(bot_id))
+    return out.getvalue()
 
 
 def login(token):
@@ -374,6 +402,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _csv(self, text, filename):
+        body = text.encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/csv; charset=utf-8')
+        self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         u = urlparse(self.path)
         if u.path in ('/', '/index.html'):
@@ -393,6 +430,12 @@ class Handler(BaseHTTPRequestHandler):
             if not term.strip():
                 return self._json({'results': []})
             return self._json({'results': search_messages(bot_id, term)})
+        if u.path == '/api/links.csv':
+            q = parse_qs(u.query)
+            bot_id = q.get('bot', [''])[0]
+            if not bot_id.isdigit():
+                return self._json({'error': 'bad params'}, 400)
+            return self._csv(links_csv(bot_id), f'links_{bot_id}.csv')
         if u.path == '/api/profile':
             q = parse_qs(u.query)
             bot_id, chat = q.get('bot', [''])[0], q.get('chat', [''])[0]
