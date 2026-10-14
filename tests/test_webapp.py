@@ -51,3 +51,12 @@ def test_viewer_has_export_links_button():
 
     assert 'id="export-links"' in html
     assert '/api/links.csv?bot=' in html
+
+
+def test_viewer_shows_one_pane_at_phone_width():
+    html = Path(__file__).parents[1].joinpath('webapp', 'index.html').read_text(encoding='utf-8')
+
+    assert '@media (max-width:700px)' in html
+    assert 'id="back"' in html
+    assert "$('#app').classList.add('chat')" in html
+    assert "$('#app').classList.remove('chat')" in html
