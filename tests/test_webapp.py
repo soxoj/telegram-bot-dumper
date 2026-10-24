@@ -60,3 +60,52 @@ def test_viewer_shows_one_pane_at_phone_width():
     assert 'id="back"' in html
     assert "$('#app').classList.add('chat')" in html
     assert "$('#app').classList.remove('chat')" in html
+
+
+def test_viewer_requires_the_real_token_and_hides_secrets(tmp_path):
+    import json
+    import threading
+    import urllib.error
+    import urllib.request
+
+    server = _load()
+    token = '12345:real-secret'
+    (tmp_path / '12345' / '67890').mkdir(parents=True)
+    (tmp_path / '12345' / 'bot.json').write_text(json.dumps({'token': token}), encoding='utf-8')
+    (tmp_path / '12345' / '12345.session').write_bytes(b'auth key')
+    (tmp_path / '12345' / '67890' / '67890_history.txt').write_text(
+        '[1][67890][2026-01-01 12:00:00] secret chat\n', encoding='utf-8')
+    server.DUMP_ROOT = str(tmp_path)
+    httpd = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f'http://127.0.0.1:{httpd.server_port}'
+
+    def call(path, body=None, cookie=None):
+        req = urllib.request.Request(base + path, data=body and json.dumps(body).encode(),
+                                     headers={'Cookie': cookie} if cookie else {})
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, r.read(), r.headers.get('Set-Cookie')
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), None
+
+    try:
+        # no session: nothing is readable, whatever the bot id
+        assert call('/api/messages?bot=12345&chat=67890')[0] == 401
+        assert call('/file/12345/bot.json')[0] == 401
+        assert call('/api/export?bot=12345&chat=67890')[0] == 401
+        assert call('/api/start', {'token': token})[0] == 401
+        # right id, wrong hash: no login
+        assert call('/api/login', {'token': '12345:guess'})[0] == 404
+
+        status, _, set_cookie = call('/api/login', {'token': token})
+        assert status == 200
+        sid = set_cookie.split(';')[0]
+        assert b'secret chat' in call('/api/messages?bot=12345&chat=67890', cookie=sid)[1]
+        # even with a session, the token and the auth key are never served
+        assert call('/file/12345/bot.json', cookie=sid)[0] == 404
+        assert call('/file/12345/12345.session', cookie=sid)[0] == 404
+        # a session for one bot doesn't open another
+        assert call('/api/messages?bot=99999&chat=67890', cookie=sid)[0] == 401
+    finally:
+        httpd.shutdown()

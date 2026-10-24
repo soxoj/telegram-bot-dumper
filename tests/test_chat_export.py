@@ -5,10 +5,15 @@ from pathlib import Path
 import threading
 from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen as _urlopen
 import zipfile
 
 import pytest
+
+
+def urlopen(url):
+    """Every request comes from a viewer logged in to bot 12345."""
+    return _urlopen(Request(url, headers={"Cookie": "sid=test"}))
 
 
 @pytest.fixture
@@ -18,6 +23,7 @@ def viewer(monkeypatch, tmp_path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "DUMP_ROOT", str(tmp_path))
+    monkeypatch.setitem(module.SESSIONS, "test", "12345")
     httpd = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -66,7 +72,7 @@ def test_download_contains_only_the_selected_chat(viewer, tmp_path):
 def test_invalid_export_parameters_are_rejected(viewer, params):
     with pytest.raises(HTTPError) as error:
         urlopen(viewer + "/api/export?" + urlencode(params))
-    assert error.value.code == 400
+    assert error.value.code in (400, 401)  # a different bot id is turned away at login
 
 
 def test_missing_chat_returns_not_found(viewer):

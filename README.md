@@ -27,7 +27,7 @@ directory structure and excludes other chats and bot-level files.
 ### Run from a prebuilt image (Docker Hub)
 
 ```sh
-docker run --rm -p 8010:8010 -v "$PWD:/data" soxoj/telegram-bot-dumper-web
+docker run --rm -p 127.0.0.1:8010:8010 -v "$PWD:/data" soxoj/telegram-bot-dumper-web
 ```
 
 ### Or build locally
@@ -43,11 +43,11 @@ pip install -r requirements.txt
 python webapp/server.py        # serves the current directory's dumps on :8010
 ```
 
-Open <http://127.0.0.1:8010> and paste a bot token to pick its dump folder. Read-only viewing is auth-free, local, and needs no API credentials. **Live mode** additionally needs `API_ID`/`API_HASH` from [my.telegram.org](https://my.telegram.org), passed via the environment — never baked into the image:
+Open <http://127.0.0.1:8010> and paste the bot token to open its dump: it must match the token saved in that dump's `bot.json`. Read-only viewing needs no API credentials. **Live mode** additionally needs `API_ID`/`API_HASH` from [my.telegram.org](https://my.telegram.org), passed via the environment — never baked into the image:
 
 ```sh
 # one-off container
-docker run --rm -p 8010:8010 -v "$PWD:/data" \
+docker run --rm -p 127.0.0.1:8010:8010 -v "$PWD:/data" \
   -e API_ID=123456 -e API_HASH=abc... soxoj/telegram-bot-dumper-web
 
 # or with docker compose: put them in a local .env (see .env.example)
