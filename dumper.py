@@ -467,7 +467,8 @@ async def discover_user(bot, user_id):
     user = full_user.users[0]
     print_user_info(user)
     save_user_info(user)
-    remove_old_text_history(user_id)
+    if not getattr(bot, 'resuming', False):
+        remove_old_text_history(user_id)
     await save_user_photos(bot, user)
     all_users[user_id] = user
     if ON_USER:
@@ -517,6 +518,7 @@ async def get_chat_history_down(bot, from_id, lookahead=0):
     if from_id <= 1:
         print('Reached the beginning of history.')
         return
+    save_last_message_id(from_id)
     to_id = max(0, from_id - HISTORY_DUMP_STEP)
     print(f'Requesting message ids {from_id - 1}..{to_id} (batch of {from_id - to_id}, walking down)...')
     messages = await bot(GetMessagesRequest(range(to_id, from_id)))
@@ -534,6 +536,7 @@ async def get_chat_history_down(bot, from_id, lookahead=0):
         print(f'Empty messages x{empty_message_counter}')
 
     save_chats_text_history()
+    save_last_message_id(to_id)
     if to_id <= 1:
         print('History was fully dumped (down).')
         return
@@ -567,7 +570,7 @@ async def offer_downward_dump(bot, message_id, lookahead):
     return False
 
 
-async def bot_auth(bot_token, proxy=None, output_dir=None):
+async def bot_auth(bot_token, proxy=None, output_dir=None, resume=False):
     # TODO: make not global
     global base_path
     bot_id = bot_token.split(':')[0]
@@ -575,7 +578,7 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
         base_path = os.path.join(output_dir, bot_id)
     else:
         base_path = bot_id
-    if os.path.exists(base_path):
+    if os.path.exists(base_path) and not resume:
         import time
         new_path = f'{base_path}_{str(int(time.time()))}'
         os.rename(base_path, new_path)
@@ -591,6 +594,7 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
     try:
         bot = await TelegramClient(os.path.join(base_path, bot_id), API_ID, API_HASH, proxy=proxy).start(bot_token=bot_token)
         bot.id = bot_id
+        bot.resuming = resume
     except AccessTokenExpiredError as e:
         print("Token has expired!")
         sys.exit()
@@ -610,7 +614,22 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
 async def main(args):
     proxy = (socks.SOCKS5, '127.0.0.1', 9050) if args.tor else None
     bot_token = args.token or input("Enter token bot: ")
-    bot = await bot_auth(bot_token, proxy=proxy, output_dir=args.output)
+    resume = getattr(args, 'resume', False)
+    start_from_id = args.start_from_id
+    if resume:
+        directory = os.path.join(args.output or '', bot_token.split(':')[0])
+        checkpoint = os.path.join(directory, 'last_message_id.txt')
+        try:
+            with open(checkpoint, encoding='ascii') as saved:
+                start_from_id = int(saved.read().strip())
+            if start_from_id < 0:
+                raise ValueError('negative message id')
+        except (OSError, ValueError):
+            raise SystemExit(
+                f'Cannot resume: {checkpoint} is missing or invalid. '
+                'Start a downward dump with --down first.'
+            ) from None
+    bot = await bot_auth(bot_token, proxy=proxy, output_dir=args.output, resume=resume)
 
     offer_state = {'pending': args.listen_only}
 
@@ -639,8 +658,8 @@ async def main(args):
             offer_state['pending'] = False
             await offer_downward_dump(bot, event.message.id, args.lookahead)
 
-    if args.start_from_id:
-        await get_chat_history_down(bot, from_id=args.start_from_id, lookahead=args.lookahead)
+    if resume or start_from_id:
+        await get_chat_history_down(bot, from_id=start_from_id, lookahead=args.lookahead)
     elif args.listen_only:
         print("Bot history dumping disabled due to `--listen-only` flag, switching to the listen mode...")
     elif args.down:
@@ -676,6 +695,8 @@ def build_parser():
                         default=0, type=int)
     parser.add_argument("--down", help="Walk message ids downwards (auto-probes max id if --start-from-id is not set)",
                         action="store_true")
+    parser.add_argument("--resume", help="Continue a downward dump from the saved last_message_id.txt",
+                        action="store_true")
     parser.add_argument("--no-photos", help="Skip downloading user profile photos", action="store_true")
     parser.add_argument("--no-media", help="Skip downloading message media (photos and documents); keep metadata only",
                         action="store_true")
@@ -695,6 +716,8 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if args.listen_only and args.no_listen:
         parser.error("Cannot combine --listen-only with --no-listen")
+    if args.resume and (args.listen_only or args.start_from_id):
+        parser.error("Cannot combine --resume with --listen-only or --start-from-id")
     return args
 
 
