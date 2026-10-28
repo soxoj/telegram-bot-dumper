@@ -57,6 +57,7 @@
      radial-gradient(circle at 20% 20%, #d3ddea 0, transparent 40%),
      radial-gradient(circle at 80% 70%, #d3ddea 0, transparent 40%), #dbe4ec}
   #main header{display:flex;align-items:center;gap:12px;padding:10px 18px;background:#fff;border-bottom:1px solid var(--border)}
+  #back{display:none}
   #main header .name{font-weight:600}
   #main header .sub{color:var(--muted);font-size:12px}
   #msgs{flex:1;overflow-y:auto;padding:18px 8%;display:flex;flex-direction:column;gap:2px}
@@ -106,6 +107,13 @@
   .prow{display:flex;gap:10px;padding:5px 0;border-top:1px solid #f0f0f0;font-size:14px}
   .pk{color:var(--muted);min-width:80px}
   .pv{color:var(--text);word-break:break-word}
+  /* phone width: one pane at a time, like Telegram Web */
+  @media (max-width:700px){
+    #side{width:100%;min-width:0}
+    #app.chat #side{display:none}
+    #app:not(.chat) #main{display:none}
+    #back{display:inline-block}
+  }
 </style>
 </head>
 <body>
@@ -133,6 +141,7 @@
   </aside>
   <section id="main">
     <header id="chathead" style="display:none">
+      <button id="back" class="iconbtn" type="button" title="Back to the chat list">‹ Back</button>
       <span id="chatav"></span>
       <div><div class="name" id="chatname"></div><div class="sub" id="chatsub"></div></div>
     </header>
@@ -252,6 +261,7 @@ async function openChat(id, row, targetId){
   (row||ROWS.get(id))?.classList.add('active');
   const c=CHATS.get(id)||{id,name:'Chat '+id};
   $('#chathead').style.display='flex';
+  $('#app').classList.add('chat');
   $('#chatname').textContent = c.name||('Chat '+id);
   $('#chatsub').textContent = (c.username?'@'+c.username+' · ':'') + 'id '+id;
   const ca=$('#chatav'); ca.innerHTML='';
@@ -440,6 +450,7 @@ document.addEventListener('keydown',e=>{
 });
 
 $('#lb').addEventListener('click',()=>{ $('#lb').style.display='none'; });
+$('#back').addEventListener('click',()=>$('#app').classList.remove('chat'));
 $('#export-links').addEventListener('click',exportLinks);
 $('#go').addEventListener('click',doLogin);
 $('#token').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
