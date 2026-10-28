@@ -8,20 +8,24 @@ Hybrid: existing folder data is read on login; after /api/start the real
 dumper.py runs in a background thread and streams each processed message
 straight to the browser over SSE (no console scraping) while it writes to the
 folders as usual. The token's id part (before ':') selects the dump folder.
-Read-only viewing is auth-free & local; add sessions if this leaves localhost.
+Login checks the token against the one saved in bot.json and sets a session
+cookie; every /api and /file request needs it.
 """
 import os
 import re
 import sys
 import csv
 import io
+import hmac
 import json
+import secrets
 import queue
 import asyncio
 import threading
 import mimetypes
 import zipfile
 from urllib.parse import urlparse, parse_qs, unquote
+from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -208,6 +212,9 @@ def login(token):
             bot = json.load(open(bp, encoding='utf-8'))
         except (OSError, ValueError):
             bot = {}
+    saved = str(bot.get('token') or '')
+    if not saved or not hmac.compare_digest(saved.encode(), token.encode()):
+        return None, 'Wrong token for this dump.'
     return {
         'botId': bot_id,
         'bot': {
@@ -253,6 +260,15 @@ def chat_archive(bot_id, chat_id):
                 if not os.path.islink(full) and os.path.isfile(full):
                     archive.write(full, os.path.join(prefix, name))
     return body.getvalue()
+
+
+def is_private(path):
+    """bot.json holds the bot token, *.session the Telethon auth key: never serve them."""
+    name = os.path.basename(path)
+    return name == 'bot.json' or name.endswith(('.session', '.session-journal'))
+
+
+SESSIONS = {}  # cookie value -> bot_id. ponytail: in-memory, a server restart logs everyone out
 
 
 # ---- live dumping (background thread) + SSE broker -------------------------
@@ -421,9 +437,11 @@ class Handler(BaseHTTPRequestHandler):
         except (ConnectionResetError, BrokenPipeError):
             pass  # client (EventSource) dropped the socket; nothing to log
 
-    def _json(self, obj, code=200):
+    def _json(self, obj, code=200, cookie=None):
         body = json.dumps(obj, default=str).encode('utf-8')
         self.send_response(code)
+        if cookie:
+            self.send_header('Set-Cookie', f'sid={cookie}; HttpOnly; SameSite=Strict; Path=/')
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
@@ -442,6 +460,14 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path in ('/', '/index.html'):
             return self._send_file(os.path.join(HERE, 'index.html'))
+        if u.path.startswith(('/api/', '/file/')):
+            if u.path.startswith('/file/'):
+                bot = unquote(u.path[len('/file/'):]).split('/', 1)[0]
+            else:
+                bot = parse_qs(u.query).get('bot', [''])[0]
+            authed = self._session_bot()
+            if not authed or (u.path != '/api/stream' and bot != authed):
+                return self._json({'error': 'login required'}, 401)
         if u.path == '/api/messages':
             q = parse_qs(u.query)
             bot_id, chat = q.get('bot', [''])[0], q.get('chat', [''])[0]
@@ -495,7 +521,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) != 2 or not parts[0].isdigit():
                 return self._json({'error': 'not found'}, 404)
             full = safe_path(parts[0], parts[1])
-            if not full or not os.path.isfile(full):
+            if not full or is_private(full) or not os.path.isfile(full):
                 return self._json({'error': 'not found'}, 404)
             return self._send_file(full)
         return self._json({'error': 'not found'}, 404)
@@ -510,9 +536,19 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return self._json({'error': 'bad request'}, 400)
         if path == '/api/start':
+            if self._session_bot() != token.split(':')[0]:
+                return self._json({'error': 'login required'}, 401)
             return self._json(start_live(token))
         data, err = login(token)
-        return self._json(data) if data else self._json({'error': err}, 404)
+        if not data:
+            return self._json({'error': err}, 404)
+        sid = secrets.token_urlsafe(32)
+        SESSIONS[sid] = data['botId']
+        return self._json(data, cookie=sid)
+
+    def _session_bot(self):
+        c = SimpleCookie(self.headers.get('Cookie', ''))
+        return SESSIONS.get(c['sid'].value) if 'sid' in c else None
 
     def _stream(self):
         q = broker.subscribe()
