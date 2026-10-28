@@ -60,6 +60,7 @@
   #back{display:none}
   #main header .name{font-weight:600}
   #main header .sub{color:var(--muted);font-size:12px}
+  #export-chat{margin-left:auto}
   #msgs{flex:1;overflow-y:auto;padding:18px 8%;display:flex;flex-direction:column;gap:2px}
   #empty{margin:auto;color:#5c6b7a;background:rgba(255,255,255,.5);padding:8px 16px;border-radius:16px}
   .day{align-self:center;background:rgba(0,0,0,.28);color:#fff;font-size:12px;padding:3px 10px;border-radius:12px;margin:12px 0}
@@ -144,6 +145,7 @@
       <button id="back" class="iconbtn" type="button" title="Back to the chat list">‹ Back</button>
       <span id="chatav"></span>
       <div><div class="name" id="chatname"></div><div class="sub" id="chatsub"></div></div>
+      <button id="export-chat" class="iconbtn" type="button" title="Download this chat as a ZIP">Download chat</button>
     </header>
     <div id="msgs"><div id="empty">Select a chat to read the dialog</div></div>
   </section>
@@ -336,6 +338,10 @@ function exportLinks(){
   if(!BOT) return;
   window.location.href = '/api/links.csv?bot='+encodeURIComponent(BOT.botId);
 }
+function exportChat(){
+  if(!BOT || !OPEN) return;
+  window.location.href = '/api/export?bot='+encodeURIComponent(BOT.botId)+'&chat='+encodeURIComponent(OPEN);
+}
 function mediaNode(chat, name){
   const url=fileUrl(chat,'media/'+name);
   const ext=(name.split('.').pop()||'').toLowerCase();
@@ -452,6 +458,7 @@ document.addEventListener('keydown',e=>{
 $('#lb').addEventListener('click',()=>{ $('#lb').style.display='none'; });
 $('#back').addEventListener('click',()=>$('#app').classList.remove('chat'));
 $('#export-links').addEventListener('click',exportLinks);
+$('#export-chat').addEventListener('click',exportChat);
 $('#go').addEventListener('click',doLogin);
 $('#token').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
 const saved = localStorage.getItem('tgv_token');

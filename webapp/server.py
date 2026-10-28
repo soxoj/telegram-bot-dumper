@@ -20,6 +20,7 @@ import queue
 import asyncio
 import threading
 import mimetypes
+import zipfile
 from urllib.parse import urlparse, parse_qs, unquote
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -226,6 +227,32 @@ def safe_path(bot_id, rel):
     if full != base and not full.startswith(base + os.sep):
         return None
     return full
+
+
+def chat_archive(bot_id, chat_id):
+    """Zip one chat's files without following symlinks into other directories."""
+    bot_dir = os.path.join(DUMP_ROOT, bot_id)
+    chat_dir = os.path.join(bot_dir, chat_id)
+    source = safe_path(bot_id, chat_id)
+    if (not source or not os.path.isdir(source)
+            or os.path.islink(bot_dir) or os.path.islink(chat_dir)):
+        raise FileNotFoundError('chat not found')
+    body = io.BytesIO()
+    with zipfile.ZipFile(body, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for root, directories, files in os.walk(source, followlinks=False):
+            directories[:] = sorted(
+                name for name in directories if not os.path.islink(os.path.join(root, name))
+            )
+            relative = os.path.relpath(root, source)
+            prefix = os.path.join(bot_id, chat_id)
+            if relative != '.':
+                prefix = os.path.join(prefix, relative)
+            archive.write(root, prefix)
+            for name in sorted(files):
+                full = os.path.join(root, name)
+                if not os.path.islink(full) and os.path.isfile(full):
+                    archive.write(full, os.path.join(prefix, name))
+    return body.getvalue()
 
 
 # ---- live dumping (background thread) + SSE broker -------------------------
@@ -436,6 +463,24 @@ class Handler(BaseHTTPRequestHandler):
             if not bot_id.isdigit():
                 return self._json({'error': 'bad params'}, 400)
             return self._csv(links_csv(bot_id), f'links_{bot_id}.csv')
+        if u.path == '/api/export':
+            q = parse_qs(u.query)
+            bot_id, chat = q.get('bot', [''])[0], q.get('chat', [''])[0]
+            if not re.fullmatch(r'[0-9]+', bot_id) or not re.fullmatch(r'[0-9]+', chat):
+                return self._json({'error': 'bad params'}, 400)
+            try:
+                body = chat_archive(bot_id, chat)
+            except FileNotFoundError:
+                return self._json({'error': 'chat not found'}, 404)
+            except OSError:
+                return self._json({'error': 'could not export chat'}, 500)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Disposition', f'attachment; filename="dump_{bot_id}_{chat}.zip"')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if u.path == '/api/profile':
             q = parse_qs(u.query)
             bot_id, chat = q.get('bot', [''])[0], q.get('chat', [''])[0]
