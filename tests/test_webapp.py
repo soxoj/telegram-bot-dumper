@@ -81,7 +81,7 @@ def test_viewer_requires_the_real_token_and_hides_secrets(tmp_path):
     base = f'http://127.0.0.1:{httpd.server_port}'
 
     def call(path, body=None, cookie=None):
-        req = urllib.request.Request(base + path, data=body and json.dumps(body).encode(),
+        req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(),
                                      headers={'Cookie': cookie} if cookie else {})
         try:
             with urllib.request.urlopen(req) as r:
@@ -95,8 +95,11 @@ def test_viewer_requires_the_real_token_and_hides_secrets(tmp_path):
         assert call('/file/12345/bot.json')[0] == 401
         assert call('/api/export?bot=12345&chat=67890')[0] == 401
         assert call('/api/start', {'token': token})[0] == 401
-        # right id, wrong hash: no login
-        assert call('/api/login', {'token': '12345:guess'})[0] == 404
+        # right id, wrong hash: no login, and the same answer as for a bot with no dump
+        wrong, unknown = call('/api/login', {'token': '12345:guess'}), call('/api/login', {'token': '99999:x'})
+        assert wrong[0] == unknown[0] == 401 and wrong[1] == unknown[1]
+        for body in ({'token': 123}, {'token': None}, []):
+            assert call('/api/login', body)[0] == 400
 
         status, _, set_cookie = call('/api/login', {'token': token})
         assert status == 200
@@ -109,3 +112,12 @@ def test_viewer_requires_the_real_token_and_hides_secrets(tmp_path):
         assert call('/api/messages?bot=99999&chat=67890', cookie=sid)[0] == 401
     finally:
         httpd.shutdown()
+
+
+def test_live_events_reach_only_sessions_of_the_live_bot():
+    server = _load()
+    mine, other = server.broker.subscribe('111'), server.broker.subscribe('222')
+    server._live['bot'] = '111'
+    server.broker.publish({'type': 'message', 'message': 'hi'})
+    assert b'hi' in mine.get_nowait()
+    assert other.empty()

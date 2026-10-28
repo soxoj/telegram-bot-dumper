@@ -58,7 +58,10 @@
      radial-gradient(circle at 80% 70%, #d3ddea 0, transparent 40%), #dbe4ec}
   #main header{display:flex;align-items:center;gap:12px;padding:10px 18px;background:#fff;border-bottom:1px solid var(--border)}
   #back{display:none}
+  #main header>div{flex:1;min-width:0}
   #main header .name{font-weight:600}
+  #main header .name,#main header .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #main header .iconbtn{flex-shrink:0}
   #main header .sub{color:var(--muted);font-size:12px}
   #export-chat{margin-left:auto}
   #msgs{flex:1;overflow-y:auto;padding:18px 8%;display:flex;flex-direction:column;gap:2px}
@@ -114,6 +117,7 @@
     #app.chat #side{display:none}
     #app:not(.chat) #main{display:none}
     #back{display:inline-block}
+    #main header{gap:8px;padding:10px 12px}
   }
 </style>
 </head>
@@ -171,6 +175,14 @@
 </div>
 
 <script>
+// the session lives in server memory: after a server restart every call gets 401.
+// Reload to the login form then (the token is prefilled, one Enter logs back in).
+const _fetch = window.fetch;
+window.fetch = async (...a) => {
+  const r = await _fetch(...a);
+  if(r.status===401 && !String(a[0]).startsWith('/api/login')) location.reload();
+  return r;
+};
 const COLORS = ['#e17076','#7bc862','#e5ca77','#65aadd','#a695e7','#ee7aae','#6ec9cb'];
 const $ = s => document.querySelector(s);
 function el(tag, props={}, ...kids){
@@ -334,13 +346,23 @@ function startLive(){
   fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN})})
     .then(r=>r.json()).then(r=>{ if(r.error){ LIVE_STATUS='✗ '+r.error; paintLive(); } }).catch(()=>{});
 }
+// download through fetch, so a lost session brings back the login form (see the fetch wrapper)
+// instead of leaving the app for a raw JSON error page
+async function download(url){
+  const r = await fetch(url);
+  if(!r.ok) return;
+  const name = (/filename="([^"]+)"/.exec(r.headers.get('Content-Disposition')||'')||[])[1] || 'download';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(await r.blob()); a.download = name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
 function exportLinks(){
   if(!BOT) return;
-  window.location.href = '/api/links.csv?bot='+encodeURIComponent(BOT.botId);
+  download('/api/links.csv?bot='+encodeURIComponent(BOT.botId));
 }
 function exportChat(){
   if(!BOT || !OPEN) return;
-  window.location.href = '/api/export?bot='+encodeURIComponent(BOT.botId)+'&chat='+encodeURIComponent(OPEN);
+  download('/api/export?bot='+encodeURIComponent(BOT.botId)+'&chat='+encodeURIComponent(OPEN));
 }
 function mediaNode(chat, name){
   const url=fileUrl(chat,'media/'+name);
