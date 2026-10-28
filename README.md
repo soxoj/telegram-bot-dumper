@@ -121,7 +121,20 @@ Output: `<bot_id>/users.csv` with columns `id, username, first_name, last_name, 
 
 ### Resume after a crash / FloodWait
 
-The downward walk prints `Requesting message ids X..Y ...` for every batch. If the run is interrupted, restart from the last printed lower bound:
+The downward walk saves its next batch boundary to `<bot_id>/last_message_id.txt`.
+If the run is interrupted, continue in the existing dump folder without probing again:
+
+```sh
+./dumper.py --token TOKEN --resume
+```
+
+Use the same `--output` directory as the original run, if one was set. Saved chat
+history and the session file are kept. A missing or invalid checkpoint produces
+an error before connecting. `--resume` cannot be combined with `--listen-only`
+or `--start-from-id`; it implies a downward walk.
+
+To choose a starting point manually instead, use the last printed lower bound
+from `Requesting message ids X..Y ...`:
 
 ```sh
 ./dumper.py --token TOKEN --start-from-id <Y>
