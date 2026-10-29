@@ -236,6 +236,23 @@ def safe_path(bot_id, rel):
     return full
 
 
+def _zip_folder(source, prefix):
+    body = io.BytesIO()
+    with zipfile.ZipFile(body, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for root, directories, files in os.walk(source, followlinks=False):
+            directories[:] = sorted(
+                name for name in directories if not os.path.islink(os.path.join(root, name))
+            )
+            relative = os.path.relpath(root, source)
+            arc_dir = prefix if relative == '.' else os.path.join(prefix, relative)
+            archive.write(root, arc_dir)
+            for name in sorted(files):
+                full = os.path.join(root, name)
+                if not os.path.islink(full) and os.path.isfile(full):
+                    archive.write(full, os.path.join(arc_dir, name))
+    return body.getvalue()
+
+
 def chat_archive(bot_id, chat_id):
     """Zip one chat's files without following symlinks into other directories."""
     bot_dir = os.path.join(DUMP_ROOT, bot_id)
@@ -244,22 +261,16 @@ def chat_archive(bot_id, chat_id):
     if (not source or not os.path.isdir(source)
             or os.path.islink(bot_dir) or os.path.islink(chat_dir)):
         raise FileNotFoundError('chat not found')
-    body = io.BytesIO()
-    with zipfile.ZipFile(body, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-        for root, directories, files in os.walk(source, followlinks=False):
-            directories[:] = sorted(
-                name for name in directories if not os.path.islink(os.path.join(root, name))
-            )
-            relative = os.path.relpath(root, source)
-            prefix = os.path.join(bot_id, chat_id)
-            if relative != '.':
-                prefix = os.path.join(prefix, relative)
-            archive.write(root, prefix)
-            for name in sorted(files):
-                full = os.path.join(root, name)
-                if not os.path.islink(full) and os.path.isfile(full):
-                    archive.write(full, os.path.join(prefix, name))
-    return body.getvalue()
+    return _zip_folder(source, os.path.join(bot_id, chat_id))
+
+
+def bot_archive(bot_id):
+    """Zip an entire bot's dump without following symlinks into other directories."""
+    bot_dir = os.path.join(DUMP_ROOT, bot_id)
+    source = safe_path(bot_id, '')
+    if (not source or not os.path.isdir(source) or os.path.islink(bot_dir)):
+        raise FileNotFoundError('bot dump not found')
+    return _zip_folder(source, bot_id)
 
 
 def is_private(path):
@@ -490,19 +501,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({'error': 'bad params'}, 400)
             return self._csv(links_csv(bot_id), f'links_{bot_id}.csv')
         if u.path == '/api/export':
-            q = parse_qs(u.query)
-            bot_id, chat = q.get('bot', [''])[0], q.get('chat', [''])[0]
-            if not re.fullmatch(r'[0-9]+', bot_id) or not re.fullmatch(r'[0-9]+', chat):
+            q = parse_qs(u.query, keep_blank_values=True)
+            bot_id = q.get('bot', [''])[0]
+            chat = q.get('chat', [None])[0]
+            if not re.fullmatch(r'[0-9]+', bot_id):
+                return self._json({'error': 'bad params'}, 400)
+            if chat is not None and not re.fullmatch(r'[0-9]+', chat):
                 return self._json({'error': 'bad params'}, 400)
             try:
-                body = chat_archive(bot_id, chat)
+                if chat is not None:
+                    body = chat_archive(bot_id, chat)
+                    filename = f'dump_{bot_id}_{chat}.zip'
+                else:
+                    body = bot_archive(bot_id)
+                    filename = f'dump_{bot_id}.zip'
             except FileNotFoundError:
-                return self._json({'error': 'chat not found'}, 404)
+                return self._json({'error': 'chat not found' if chat is not None else 'dump not found'}, 404)
             except OSError:
-                return self._json({'error': 'could not export chat'}, 500)
+                return self._json({'error': 'could not export chat' if chat is not None else 'could not export dump'}, 500)
             self.send_response(200)
             self.send_header('Content-Type', 'application/zip')
-            self.send_header('Content-Disposition', f'attachment; filename="dump_{bot_id}_{chat}.zip"')
+            self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
