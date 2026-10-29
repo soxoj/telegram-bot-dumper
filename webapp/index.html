@@ -282,6 +282,7 @@ async function openChat(id, row, targetId){
   ca.append(avatar('av sm', c.name, id, c.avatar?fileUrl(id,c.avatar):null));
   const box=$('#msgs'); box.innerHTML='<div id="empty">Loading…</div>';
   const r = await fetch('/api/messages?bot='+BOT.botId+'&chat='+encodeURIComponent(id));
+  if(!r.ok) return;                                // 401 is already reloading to the login form
   const {messages} = await r.json();
   if(OPEN!==id) return;                            // user switched away while loading
   box.innerHTML='';
@@ -350,7 +351,11 @@ function startLive(){
 // instead of leaving the app for a raw JSON error page
 async function download(url){
   const r = await fetch(url);
-  if(!r.ok) return;
+  if(r.status===401) return;                       // the fetch wrapper is reloading to the login form
+  if(!r.ok){
+    let err=''; try{ err=(await r.json()).error; }catch{}
+    return alert('Download failed: '+(err||r.status));
+  }
   const name = (/filename="([^"]+)"/.exec(r.headers.get('Content-Disposition')||'')||[])[1] || 'download';
   const a = document.createElement('a');
   a.href = URL.createObjectURL(await r.blob()); a.download = name; a.click();

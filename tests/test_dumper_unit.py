@@ -678,6 +678,13 @@ async def test_probe_max_id_finds_messages_above_the_power_of_ten():
 
 
 @pytest.mark.asyncio
+async def test_probe_max_id_reports_newer_messages_once(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "HISTORY_DUMP_STEP", 2)
+    assert await dumper.probe_max_id(IdBot(last=120)) == 120
+    assert capsys.readouterr().out.count("found newer messages") == 1
+
+
+@pytest.mark.asyncio
 async def test_upward_dump_keeps_going_while_batches_have_messages(monkeypatch):
     seen = []
 
