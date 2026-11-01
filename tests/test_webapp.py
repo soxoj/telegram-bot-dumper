@@ -95,9 +95,11 @@ def test_viewer_requires_the_real_token_and_hides_secrets(tmp_path):
         assert call('/file/12345/bot.json')[0] == 401
         assert call('/api/export?bot=12345&chat=67890')[0] == 401
         assert call('/api/start', {'token': token})[0] == 401
-        # right id, wrong hash: no login, and the same answer as for a bot with no dump
+        # right id, wrong hash, or no dump at all: no login, and the answer says which
         wrong, unknown = call('/api/login', {'token': '12345:guess'}), call('/api/login', {'token': '99999:x'})
-        assert wrong[0] == unknown[0] == 401 and wrong[1] == unknown[1]
+        assert wrong[0] == unknown[0] == 401
+        assert b'bot.json' in wrong[1] and b'--allow-new-dumps' in unknown[1]
+        assert not (tmp_path / '99999').exists()
         for body in ({'token': 123}, {'token': None}, []):
             assert call('/api/login', body)[0] == 400
 
@@ -121,3 +123,72 @@ def test_live_events_reach_only_sessions_of_the_live_bot():
     server.broker.publish({'type': 'message', 'message': 'hi'})
     assert b'hi' in mine.get_nowait()
     assert other.empty()
+
+
+class FakeClient:
+    """Stands in for telethon.TelegramClient: accepts only GOOD, writes a session like the real one."""
+    GOOD = '777:good'
+
+    def __init__(self, session, api_id, api_hash):
+        self.session = session
+
+    async def start(self, bot_token):
+        open(self.session + '.session', 'w').close()
+        if bot_token != self.GOOD:
+            raise ValueError('The api_id/api_hash combination is invalid')
+        return self
+
+    async def get_me(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(to_dict=lambda: {'id': 777, 'first_name': 'Newbie', 'username': 'new_bot'})
+
+    async def disconnect(self):
+        pass
+
+
+def test_allow_new_dumps_creates_bot_json_only_for_a_token_telegram_accepts(tmp_path, monkeypatch):
+    import json
+    import sys
+    import telethon
+    server = _load()
+    sys.path.insert(0, server.REPO_ROOT)
+    import dumper
+    monkeypatch.setattr(telethon, 'TelegramClient', FakeClient)
+    monkeypatch.setattr(dumper, 'API_ID', 1)
+    monkeypatch.setattr(dumper, 'API_HASH', 'h')
+    monkeypatch.setattr(server, 'DUMP_ROOT', str(tmp_path))
+    monkeypatch.setattr(server, 'ALLOW_NEW_DUMPS', True)
+
+    data, err = server.login('777:bad')
+    assert data is None and 'rejected' in err
+    assert not (tmp_path / '777').exists()  # no half-made folder left behind
+
+    data, err = server.login(FakeClient.GOOD)
+    assert err is None and data['bot']['name'] == 'Newbie' and data['chats'] == []
+    saved = json.loads((tmp_path / '777' / 'bot.json').read_text())
+    assert saved['token'] == FakeClient.GOOD and saved['username'] == 'new_bot'
+
+    # the folder exists now, so the next login is the usual bot.json check
+    assert server.login('777:bad')[0] is None and 'bot.json' in server.login('777:bad')[1]
+    assert server.login(FakeClient.GOOD)[0]['botId'] == '777'
+
+
+def test_allow_new_dumps_needs_api_credentials(tmp_path, monkeypatch):
+    import sys
+    server = _load()
+    sys.path.insert(0, server.REPO_ROOT)
+    import dumper
+    monkeypatch.setattr(dumper, 'API_ID', 0)
+    monkeypatch.setattr(server, 'DUMP_ROOT', str(tmp_path))
+    monkeypatch.setattr(server, 'ALLOW_NEW_DUMPS', True)
+    data, err = server.login('777:x')
+    assert data is None and 'API_ID' in err and not (tmp_path / '777').exists()
+
+
+def test_allow_new_dumps_refuses_a_public_host_without_allow_public(tmp_path):
+    import subprocess
+    import sys
+    env = {**os.environ, 'HOST': '0.0.0.0', 'PORT': '0', 'ALLOW_NEW_DUMPS': '1'}
+    env.pop('ALLOW_PUBLIC', None)
+    r = subprocess.run([sys.executable, SERVER, str(tmp_path)], env=env, capture_output=True, text=True, timeout=30)
+    assert r.returncode != 0 and '--allow-public' in r.stderr
