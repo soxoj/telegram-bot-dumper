@@ -45,7 +45,7 @@ _new_dump_lock = threading.Lock()
 MSG_RE = re.compile(r'^\[(\d+)\]((?:\[[^\]]*\])*)\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[^\]]*)\]\s?(.*)$')
 MEDIA_RE = re.compile(r'^(?:Photo|Document|Photo of chat was changed): media/(.+)$')
 URL_RE = re.compile(r'https?://[^\s<>()"\']+')
-USER_FIELDS = ('id', 'first_name', 'last_name', 'username', 'bot', 'premium', 'verified', 'scam', 'fake', 'phone')
+USER_FIELDS = ('id', 'title', 'first_name', 'last_name', 'username', 'bot', 'premium', 'verified', 'scam', 'fake', 'phone')
 
 
 def _ids(middle):
@@ -99,6 +99,9 @@ def load_user(chat_dir, chat_id):
 
 
 def display_name(user, chat_id):
+    title = user.get('title')
+    if title:
+        return title
     name = ' '.join(x for x in (user.get('first_name'), user.get('last_name')) if x).strip()
     return name or (('@' + user['username']) if user.get('username') else f'Chat {chat_id}')
 

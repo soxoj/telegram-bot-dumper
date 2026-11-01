@@ -428,6 +428,8 @@ async def process_message(bot, m, empty_message_counter=0):
     is_outgoing_pm = (str(m_from_id) == str(bot.id)
                       and isinstance(m.peer_id, PeerUser)
                       and m_chat_id and str(m_chat_id) != str(m_from_id))
+    if is_group and m_chat_id not in all_chats:
+        await discover_chat(bot, m.peer_id, m_chat_id)
     if is_group:
         text = f'[{m.id}][from:{m_from_id}][group:{m_chat_id}][{m.date}] {message_text}'
     elif is_outgoing_pm:
@@ -456,6 +458,24 @@ async def process_message(bot, m, empty_message_counter=0):
         await discover_user(bot, user_to_resolve)
 
     return False
+
+
+async def discover_chat(bot, peer, chat_id):
+    """Fetch a group/channel entity once per run (history walk path) and
+    save its info json and profile photo, like the live NewMessage handler does."""
+    if chat_id in all_chats:
+        return
+    all_chats[chat_id] = peer
+    entity = await safe_api_request(bot.get_entity(peer), f'get chat entity {chat_id}')
+    if entity is None:
+        return
+    chat_dir = os.path.join(base_path, str(chat_id))
+    if not os.path.exists(chat_dir):
+        os.mkdir(chat_dir)
+    with open(os.path.join(chat_dir, f'{chat_id}.json'), 'w') as f:
+        json.dump(entity.to_dict(), f)
+    print(f'NEW CHAT DISCOVERED: {chat_id} {chat_display_name(entity)}')
+    await save_chat_photo(bot, entity)
 
 
 async def discover_user(bot, user_id):
