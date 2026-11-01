@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Telegram-Web-like viewer + live dumper over dumper.py output.
 
-Run:  python webapp/server.py [DUMP_ROOT]
+Run:  python webapp/server.py [DUMP_ROOT] [--allow-new-dumps [--allow-public]]
 Open: http://127.0.0.1:8010  and paste a bot token.
 
 Hybrid: existing folder data is read on login; after /api/start the real
@@ -9,7 +9,9 @@ dumper.py runs in a background thread and streams each processed message
 straight to the browser over SSE (no console scraping) while it writes to the
 folders as usual. The token's id part (before ':') selects the dump folder.
 Login checks the token against the one saved in bot.json and sets a session
-cookie; every /api and /file request needs it.
+cookie; every /api and /file request needs it. With --allow-new-dumps a token
+with no dump yet is checked with Telegram, gets a folder and bot.json, and the
+live mode then dumps its whole history.
 """
 import os
 import re
@@ -19,6 +21,7 @@ import io
 import hmac
 import json
 import secrets
+import shutil
 import queue
 import asyncio
 import threading
@@ -30,10 +33,13 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)  # where dumper.py lives
-_arg = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('--') else None
+_arg = next((a for a in sys.argv[1:] if not a.startswith('--')), None)
 DUMP_ROOT = os.path.abspath(_arg) if _arg else REPO_ROOT
 PORT = int(os.environ.get('PORT', '8010'))
 HOST = os.environ.get('HOST', '127.0.0.1')  # set HOST=0.0.0.0 to expose (e.g. in Docker)
+ALLOW_NEW_DUMPS = '--allow-new-dumps' in sys.argv or os.environ.get('ALLOW_NEW_DUMPS') == '1'
+ALLOW_PUBLIC = '--allow-public' in sys.argv or os.environ.get('ALLOW_PUBLIC') == '1'
+_new_dump_lock = threading.Lock()
 
 # [id] [from_id][optional to:/from:/group:] ... [date] text...   (greedy middle backtracks to release the date bracket)
 MSG_RE = re.compile(r'^\[(\d+)\]((?:\[[^\]]*\])*)\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[^\]]*)\]\s?(.*)$')
@@ -198,13 +204,48 @@ def links_csv(bot_id):
     return out.getvalue()
 
 
+def new_dump(token, bot_id):
+    """Check the token with Telegram and save bot.json like dumper.py does; error text or None."""
+    sys.path.insert(0, REPO_ROOT)
+    import dumper as D
+    if not D.API_ID or not D.API_HASH:
+        return 'Set API_ID and API_HASH to dump a new bot.'
+    root = os.path.join(DUMP_ROOT, bot_id)
+
+    async def check():
+        from telethon import TelegramClient
+        client = TelegramClient(os.path.join(root, bot_id), D.API_ID, D.API_HASH)
+        await client.start(bot_token=token)
+        try:
+            info = (await client.get_me()).to_dict()
+        finally:
+            await client.disconnect()
+        info['token'] = token
+        with open(os.path.join(root, 'bot.json'), 'w') as f:
+            json.dump(info, f, default=str)
+
+    os.makedirs(root)
+    try:
+        asyncio.run(check())
+    except Exception as e:
+        shutil.rmtree(root, ignore_errors=True)  # no half-made folder for a rejected token
+        return f'Telegram rejected the token: {e}'
+    return None
+
+
 def login(token):
     if ':' not in token or not token.split(':')[0].isdigit():
         return None, 'Invalid token format (expected <id>:<hash>).'
     bot_id = token.split(':')[0]
     root = os.path.join(DUMP_ROOT, bot_id)
-    if not os.path.isdir(root):
-        return None, 'Wrong token or no dump for this bot.'  # same text as below: don't reveal which bots have dumps
+    with _new_dump_lock:  # two logins for one new bot must not both create the folder
+        if not os.path.isdir(root):
+            if not ALLOW_NEW_DUMPS:
+                return None, (f'No dump for bot {bot_id} in {DUMP_ROOT}. Run dumper.py first, '
+                              'or start the viewer with --allow-new-dumps to dump it from here.')
+            err = new_dump(token, bot_id)
+            if err:
+                return None, err
     bot = {}
     bp = os.path.join(root, 'bot.json')
     if os.path.exists(bp):
@@ -214,7 +255,7 @@ def login(token):
             bot = {}
     saved = str(bot.get('token') or '')
     if not saved or not hmac.compare_digest(saved.encode(), token.encode()):
-        return None, 'Wrong token or no dump for this bot.'
+        return None, "Token doesn't match the one saved in this dump's bot.json."
     return {
         'botId': bot_id,
         'bot': {
@@ -631,6 +672,9 @@ if __name__ == '__main__':
     if '--selftest' in sys.argv:
         selftest()
         sys.exit()
+    if ALLOW_NEW_DUMPS and HOST not in ('127.0.0.1', '::1', 'localhost') and not ALLOW_PUBLIC:
+        sys.exit(f'--allow-new-dumps lets anyone who can open this page dump any bot under your API_ID, '
+                 f'and HOST={HOST} is not loopback. Add --allow-public (ALLOW_PUBLIC=1) if you mean it.')
     bots = sorted(n for n in os.listdir(DUMP_ROOT)
                   if n.isdigit() and os.path.exists(os.path.join(DUMP_ROOT, n, 'bot.json')))
     print(f'Dump root: {DUMP_ROOT}')

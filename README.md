@@ -56,6 +56,18 @@ cp .env.example .env && $EDITOR .env && docker compose up
 
 `PORT` and `HOST` env vars override the defaults (`8010`, `127.0.0.1`).
 
+#### Dumping a new bot from the viewer
+
+By default the viewer only opens bots that already have a dump. Start it with `--allow-new-dumps` (`ALLOW_NEW_DUMPS=1` in Docker) and a token with no dump yet is checked with Telegram, gets its folder and `bot.json`, and live mode dumps its whole history straight into the browser. This needs `API_ID`/`API_HASH`.
+
+Anyone who can open the page can then make your server dump any bot under your `API_ID`, so the viewer refuses to start with this flag on a non-loopback `HOST`. In Docker `HOST` is always `0.0.0.0` inside the container, so add `ALLOW_PUBLIC=1` (`--allow-public`) and keep the port on loopback yourself:
+
+```sh
+docker run --rm -p 127.0.0.1:8010:8010 -v "$PWD:/data" \
+  -e API_ID=123456 -e API_HASH=abc... -e ALLOW_NEW_DUMPS=1 -e ALLOW_PUBLIC=1 \
+  soxoj/telegram-bot-dumper-web
+```
+
 ## Features
 
 - Dump bot's messages with media content by walking message ids upwards (default) or downwards (`--down` / `--start-from-id`).
