@@ -1,5 +1,7 @@
 # telegram-bot-dumper
 
+[![Documentation Status](https://readthedocs.org/projects/telegram-bot-dumper/badge/?version=latest)](https://telegram-bot-dumper.readthedocs.io/en/latest/)
+
 Easy dumping of all Telegram bot stuff.
 
 **Input**: only bot token.
@@ -11,6 +13,8 @@ Easy dumping of all Telegram bot stuff.
 This is a Python implementation.
 
 🚀 Fast [Golang version](https://github.com/soxoj/telegram-bot-dumper-go) by [ScBoln](https://github.com/ScBoln).
+
+📖 Full documentation: <https://telegram-bot-dumper.readthedocs.io>
 
 ## Web viewer
 
