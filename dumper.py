@@ -479,17 +479,17 @@ async def get_chat_history(bot, from_id=0, to_id=0, chat_id=None, lookahead=0):
     print(f'Dumping history from {from_id} to {to_id}...')
     messages = await bot(GetMessagesRequest(range(to_id, from_id)))
     empty_message_counter = 0
-    history_tail = True
+    history_tail = True  # an all-empty batch; only then do we spend lookahead or stop
     for m in messages.messages:
         is_empty = await process_message(bot, m, empty_message_counter)
         if is_empty:
             empty_message_counter += 1
         else:
             empty_message_counter = 0
+            history_tail = False
 
     if empty_message_counter:
         print(f'Empty messages x{empty_message_counter}')
-        history_tail = True
 
     save_chats_text_history()
     if not history_tail:
@@ -511,6 +511,15 @@ async def probe_max_id(bot, max_pow=9):
         if not isinstance(m, MessageEmpty):
             print(f'  hit at id={m.id}')
             highest = max(highest, m.id)
+    # powers of ten only give a lower bound: walk up until a whole batch is empty.
+    # ponytail: a gap of more than one batch of deleted ids above the hit still cuts the top off
+    while highest:
+        msgs = await bot(GetMessagesRequest(list(range(highest + 1, highest + 1 + HISTORY_DUMP_STEP))))
+        real = [m.id for m in msgs.messages if not isinstance(m, MessageEmpty)]
+        if not real or max(real) <= highest:
+            break
+        highest = max(real)
+        print(f'  found newer messages up to id={highest}')
     return highest
 
 

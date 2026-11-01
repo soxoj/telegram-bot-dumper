@@ -543,6 +543,37 @@ async def test_probe_max_id_returns_highest_real():
     assert await dumper.probe_max_id(bot) == 100
 
 
+class IdBot:
+    """Answers GetMessagesRequest like Telegram: one entry per requested id, real if id <= last."""
+    def __init__(self, last):
+        self.last = last
+
+    async def __call__(self, request):
+        return SimpleNamespace(messages=[
+            SimpleNamespace(id=i) if 0 < i <= self.last else MessageEmpty(id=i, peer_id=None)
+            for i in request.id])
+
+
+@pytest.mark.asyncio
+async def test_probe_max_id_finds_messages_above_the_power_of_ten():
+    assert await dumper.probe_max_id(IdBot(last=120)) == 120
+
+
+@pytest.mark.asyncio
+async def test_upward_dump_keeps_going_while_batches_have_messages(monkeypatch):
+    seen = []
+
+    async def record(bot, m, counter=0):
+        if isinstance(m, MessageEmpty):
+            return True
+        seen.append(m.id)
+        return False
+    monkeypatch.setattr(dumper, "process_message", record)
+    monkeypatch.setattr(dumper, "save_chats_text_history", lambda: None)
+    await dumper.get_chat_history(IdBot(last=999), from_id=dumper.HISTORY_DUMP_STEP, to_id=0)
+    assert seen == list(range(1, 1000))
+
+
 @pytest.mark.asyncio
 async def test_probe_max_id_all_empty_returns_zero():
     candidates = [10 ** i for i in range(0, 10)]

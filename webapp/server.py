@@ -204,7 +204,7 @@ def login(token):
     bot_id = token.split(':')[0]
     root = os.path.join(DUMP_ROOT, bot_id)
     if not os.path.isdir(root):
-        return None, f'No dump found for bot {bot_id} in {DUMP_ROOT}.'
+        return None, 'Wrong token or no dump for this bot.'  # same text as below: don't reveal which bots have dumps
     bot = {}
     bp = os.path.join(root, 'bot.json')
     if os.path.exists(bp):
@@ -214,7 +214,7 @@ def login(token):
             bot = {}
     saved = str(bot.get('token') or '')
     if not saved or not hmac.compare_digest(saved.encode(), token.encode()):
-        return None, 'Wrong token for this dump.'
+        return None, 'Wrong token or no dump for this bot.'
     return {
         'botId': bot_id,
         'bot': {
@@ -274,26 +274,28 @@ SESSIONS = {}  # cookie value -> bot_id. ponytail: in-memory, a server restart l
 # ---- live dumping (background thread) + SSE broker -------------------------
 
 class Broker:
-    """Fan out events to all connected SSE clients. Thread-safe."""
+    """Fan out the live bot's events to the SSE clients logged in to that bot. Thread-safe."""
     def __init__(self):
-        self.clients = set()
+        self.clients = {}  # queue -> bot_id of the session that opened the stream
         self.lock = threading.Lock()
 
     def publish(self, event):
         data = ('data: ' + json.dumps(event, default=str) + '\n\n').encode('utf-8')
+        bot = _live['bot']
         with self.lock:
-            for q in list(self.clients):
-                q.put(data)
+            for q, client_bot in list(self.clients.items()):
+                if client_bot == bot:
+                    q.put(data)
 
-    def subscribe(self):
+    def subscribe(self, bot_id):
         q = queue.Queue()
         with self.lock:
-            self.clients.add(q)
+            self.clients[q] = bot_id
         return q
 
     def unsubscribe(self, q):
         with self.lock:
-            self.clients.discard(q)
+            self.clients.pop(q, None)
 
 
 broker = Broker()
@@ -410,8 +412,8 @@ def _run_live(token, bot_id):
     except Exception as e:
         broker.publish({'type': 'error', 'error': str(e)})
     finally:
+        broker.publish({'type': 'status', 'status': 'stopped'})  # before clearing: publish routes by _live['bot']
         _live['bot'] = None
-        broker.publish({'type': 'status', 'status': 'stopped'})
 
 
 def start_live(token):
@@ -533,7 +535,7 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get('Content-Length', 0))
         try:
             token = json.loads(self.rfile.read(n) or b'{}').get('token', '').strip()
-        except ValueError:
+        except (ValueError, AttributeError):  # not JSON, not an object, or token not a string
             return self._json({'error': 'bad request'}, 400)
         if path == '/api/start':
             if self._session_bot() != token.split(':')[0]:
@@ -541,7 +543,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(start_live(token))
         data, err = login(token)
         if not data:
-            return self._json({'error': err}, 404)
+            return self._json({'error': err}, 401)
         sid = secrets.token_urlsafe(32)
         SESSIONS[sid] = data['botId']
         return self._json(data, cookie=sid)
@@ -551,7 +553,7 @@ class Handler(BaseHTTPRequestHandler):
         return SESSIONS.get(c['sid'].value) if 'sid' in c else None
 
     def _stream(self):
-        q = broker.subscribe()
+        q = broker.subscribe(self._session_bot())
         try:
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
