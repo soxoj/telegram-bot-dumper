@@ -17,8 +17,10 @@ The authoritative list is ``./dumper.py --help``; this page mirrors it.
      - Walk message ids downwards, auto-probing the max id when
        ``--start-from-id`` is not set. Best for active bots.
    * - ``--start-from-id N``
-     - Dump downwards starting from message id ``N`` (skips the probe). Also used
-       to resume an interrupted run.
+     - Dump downwards starting from message id ``N`` (skips the probe).
+   * - ``--resume``
+     - Continue an interrupted downward dump from the id saved in
+       ``last_message_id.txt``, keeping the existing folder and history.
    * - ``--listen-only``
      - Don't dump history; watch for new messages in real time. On the first one,
        offers to start a downward dump from its id.
@@ -41,6 +43,10 @@ The authoritative list is ``./dumper.py --help``; this page mirrors it.
        ``<user_id>/<user_id>.json`` directories.
    * - ``--tor``
      - Route through a local Tor SOCKS5 proxy on ``127.0.0.1:9050``.
+   * - ``--output DIR``
+     - Directory to save the dump (default ``./<bot_id>``).
+   * - ``--no-listen``
+     - Exit after dumping history instead of listening for new messages.
 
 Credentials are **not** flags: ``API_ID`` and ``API_HASH`` are read from the
 environment (see :doc:`quick-start`).

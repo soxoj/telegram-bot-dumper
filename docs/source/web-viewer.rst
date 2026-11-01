@@ -14,15 +14,20 @@ streams new messages into the browser in real time.
    :alt: Web viewer showing the dump of an internal corporate bot
    :width: 100%
 
-Read-only viewing is auth-free, local, and needs **no** API credentials — you
-only need them for live capture.
+You log in with the bot token, which must match the one saved in that dump's
+``bot.json``; the session cookie then guards every request. Read-only viewing
+needs **no** API credentials — only live capture does.
+
+From an open chat, **Download chat** saves its history, media, and photos as
+``dump_<bot_id>_<chat_id>.zip`` (other chats and bot-level files excluded), and
+**Export links** saves every URL across the dump with its sender id as a CSV.
 
 Run from a prebuilt image (Docker Hub)
 --------------------------------------
 
 .. code-block:: sh
 
-   docker run --rm -p 8010:8010 -v "$PWD:/data" soxoj/telegram-bot-dumper-web
+   docker run --rm -p 127.0.0.1:8010:8010 -v "$PWD:/data" soxoj/telegram-bot-dumper-web
 
 Build locally
 -------------
@@ -51,7 +56,7 @@ never baked into the image:
 .. code-block:: sh
 
    # one-off container
-   docker run --rm -p 8010:8010 -v "$PWD:/data" \
+   docker run --rm -p 127.0.0.1:8010:8010 -v "$PWD:/data" \
      -e API_ID=123456 -e API_HASH=abc... soxoj/telegram-bot-dumper-web
 
    # or with docker compose: put them in a local .env (see .env.example)
@@ -77,3 +82,33 @@ Configuration
      - *(unset)*
      - Telegram API credentials. Only needed for live capture; viewing an
        existing dump needs neither.
+   * - ``ALLOW_NEW_DUMPS``
+     - *(unset)*
+     - Set ``1`` (CLI ``--allow-new-dumps``) to let a token with no dump yet be
+       dumped from the login screen. Needs ``API_ID``/``API_HASH``.
+   * - ``ALLOW_PUBLIC``
+     - *(unset)*
+     - Set ``1`` (CLI ``--allow-public``) to allow ``ALLOW_NEW_DUMPS`` on a
+       non-loopback ``HOST``. Without it the server refuses to start in that case.
+
+Dumping a new bot from the viewer
+---------------------------------
+
+By default the viewer only opens bots that already have a dump; pasting an
+unknown token just says there is no dump for it. With ``ALLOW_NEW_DUMPS`` on,
+an unknown token is instead checked with Telegram, the bot gets its folder and
+``bot.json``, and live mode dumps its whole history straight into the browser.
+
+.. warning::
+   This lets anyone who can open the page dump any bot under **your**
+   ``API_ID``. The viewer therefore refuses to start with ``ALLOW_NEW_DUMPS``
+   on a non-loopback ``HOST`` unless you also set ``ALLOW_PUBLIC=1``. The Docker
+   image binds ``0.0.0.0`` inside the container, so keep the published port on
+   ``127.0.0.1`` (as the ``docker run`` lines above do) and treat
+   ``ALLOW_PUBLIC`` as a deliberate choice.
+
+.. code-block:: sh
+
+   docker run --rm -p 127.0.0.1:8010:8010 -v "$PWD:/data" \
+     -e API_ID=123456 -e API_HASH=abc... -e ALLOW_NEW_DUMPS=1 -e ALLOW_PUBLIC=1 \
+     soxoj/telegram-bot-dumper-web
