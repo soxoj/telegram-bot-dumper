@@ -2,6 +2,7 @@ import json
 import shutil
 import os
 import pytest
+import pytest_asyncio
 from telethon.sync import TelegramClient
 
 from dumper import *
@@ -58,8 +59,7 @@ async def test_dumper():
 """
 
 
-@pytest.fixture(autouse=True)
-@pytest.mark.asyncio
+@pytest_asyncio.fixture(autouse=True)
 async def exit_pytest_first_failure():
     yield
     await bot.disconnect()
