@@ -62,5 +62,8 @@ async def test_dumper():
 @pytest_asyncio.fixture(autouse=True)
 async def exit_pytest_first_failure():
     yield
-    await bot.disconnect()
+    global bot
+    if bot is not None:
+        await bot.disconnect()
+        bot = None
     
