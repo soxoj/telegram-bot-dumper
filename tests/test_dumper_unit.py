@@ -1,5 +1,6 @@
 """Unit tests for new logic added to dumper.py."""
 import csv
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -8,7 +9,7 @@ import pytest
 import dumper
 from telethon.tl.types import (
     PeerUser, PeerChat, PeerChannel,
-    MessageEmpty, MessageMediaPhoto,
+    MessageEmpty, MessageMediaPhoto, MessageMediaGeo, MessageMediaContact,
     MessageMediaPoll, MessageMediaVenue, MessageMediaDice, MessageMediaGame,
     MessageMediaInvoice, MessageMediaGeoLive, MessageMediaWebPage,
 )
@@ -37,10 +38,16 @@ class FakeBot:
         self.id = id
         self.calls = []
         self.downloaded_photos = []
+        self.entity = None
+        self.entity_calls = []
 
     async def __call__(self, request):
         self.calls.append(request)
         return self.response
+
+    async def get_entity(self, peer):
+        self.entity_calls.append(peer)
+        return self.entity
 
     async def download_profile_photo(self, entity, file=None):
         self.downloaded_photos.append((entity, file))
@@ -320,6 +327,51 @@ async def test_process_message_supergroup_format(monkeypatch, capsys):
     assert "[5][from:42][group:8888][2026-04-01] x" in out
 
 
+# ---------- history walk chat discovery ----------
+
+def _group_entity(chat_id, title):
+    entity = SimpleNamespace(
+        id=chat_id, title=title, username=None,
+        first_name=None, last_name=None,
+        to_dict=lambda: {'id': chat_id, 'title': title},
+    )
+    return entity
+
+
+@pytest.mark.asyncio
+async def test_history_walk_saves_chat_info_and_photo(tmp_path):
+    bot = FakeBot()
+    bot.entity = _group_entity(777, 'Test Group')
+    m = _message(5, PeerUser(user_id=42), PeerChat(chat_id=777), text="ho")
+    await dumper.process_message(bot, m)
+
+    info_path = tmp_path / '777' / '777.json'
+    assert info_path.exists()
+    assert json.load(open(info_path))['title'] == 'Test Group'
+    assert bot.downloaded_photos, 'chat photo should be saved'
+    assert bot.entity_calls == [PeerChat(chat_id=777)]
+
+
+@pytest.mark.asyncio
+async def test_history_walk_fetches_entity_once_per_chat(tmp_path):
+    bot = FakeBot()
+    bot.entity = _group_entity(777, 'Test Group')
+    await dumper.process_message(bot, _message(5, PeerUser(user_id=42), PeerChat(chat_id=777)))
+    await dumper.process_message(bot, _message(6, PeerUser(user_id=43), PeerChat(chat_id=777)))
+    assert len(bot.entity_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_history_walk_respects_no_photos(tmp_path, monkeypatch):
+    monkeypatch.setattr(dumper, "NO_PHOTOS", True)
+    bot = FakeBot()
+    bot.entity = _group_entity(777, 'Test Group')
+    await dumper.process_message(bot, _message(5, PeerUser(user_id=42), PeerChat(chat_id=777)))
+
+    assert (tmp_path / '777' / '777.json').exists(), 'info json should still be saved'
+    assert not bot.downloaded_photos, 'photo download should be skipped with --no-photos'
+
+
 # ---------- process_message NO_HISTORY ----------
 
 @pytest.mark.asyncio
@@ -443,7 +495,26 @@ async def test_process_message_media_geo_live(monkeypatch, capsys):
         period=900,
     )
     await dumper.process_message(FakeBot(), m)
-    assert "Live geoposition: 37.6176, 55.7558 (period: 900s)" in capsys.readouterr().out
+    assert "Live geoposition: 55.7558, 37.6176 (period: 900s)" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_media_geo_is_lat_long(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(17, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaGeo(geo=SimpleNamespace(long=2.2945, lat=48.8584))
+    await dumper.process_message(FakeBot(), m)
+    assert "Geoposition: 48.8584, 2.2945" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_process_message_contact_without_vcard(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    m = _message(18, PeerUser(user_id=42), PeerUser(user_id=42), text="")
+    m.media = MessageMediaContact(phone_number="+10000000000", first_name="QA", last_name="Fake",
+                                  vcard="", user_id=0)
+    await dumper.process_message(FakeBot(), m)
+    assert capsys.readouterr().out.rstrip().endswith("Vcard: phone +10000000000, QA Fake")
 
 
 @pytest.mark.asyncio
@@ -583,6 +654,37 @@ async def test_probe_max_id_returns_highest_real():
     assert await dumper.probe_max_id(bot) == 100
 
 
+class IdBot:
+    """Answers GetMessagesRequest like Telegram: one entry per requested id, real if id <= last."""
+    def __init__(self, last):
+        self.last = last
+
+    async def __call__(self, request):
+        return SimpleNamespace(messages=[
+            SimpleNamespace(id=i) if 0 < i <= self.last else MessageEmpty(id=i, peer_id=None)
+            for i in request.id])
+
+
+@pytest.mark.asyncio
+async def test_probe_max_id_finds_messages_above_the_power_of_ten():
+    assert await dumper.probe_max_id(IdBot(last=120)) == 120
+
+
+@pytest.mark.asyncio
+async def test_upward_dump_keeps_going_while_batches_have_messages(monkeypatch):
+    seen = []
+
+    async def record(bot, m, counter=0):
+        if isinstance(m, MessageEmpty):
+            return True
+        seen.append(m.id)
+        return False
+    monkeypatch.setattr(dumper, "process_message", record)
+    monkeypatch.setattr(dumper, "save_chats_text_history", lambda: None)
+    await dumper.get_chat_history(IdBot(last=999), from_id=dumper.HISTORY_DUMP_STEP, to_id=0)
+    assert seen == list(range(1, 1000))
+
+
 @pytest.mark.asyncio
 async def test_probe_max_id_all_empty_returns_zero():
     candidates = [10 ** i for i in range(0, 10)]
@@ -661,3 +763,60 @@ async def test_pinned_service_message_names_the_pinned_message():
     await dumper.process_message(FakeBot(), _service_message(MessageActionPinMessage(), reply_to))
 
     assert _history_line().endswith("Pinned message 17")
+
+
+def test_parse_args_no_listen():
+    args = dumper.parse_args(["--token", "123:abc", "--no-listen"])
+    assert args.no_listen is True
+    assert args.listen_only is False
+
+
+def test_parse_args_listen_only_and_no_listen_rejected():
+    with pytest.raises(SystemExit):
+        dumper.parse_args(["--token", "123:abc", "--listen-only", "--no-listen"])
+
+
+@pytest.mark.asyncio
+async def test_main_exits_early_on_no_listen(monkeypatch, tmp_path):
+    disconnect_called = []
+    run_until_disconnected_called = []
+
+    class DummyBot(FakeBot):
+        def __init__(self):
+            super().__init__(response=SimpleNamespace(users=[SimpleNamespace(to_dict=lambda: {})]))
+
+        async def get_me(self):
+            return SimpleNamespace(id=999)
+
+        def on(self, event):
+            return lambda fn: fn
+
+        async def disconnect(self):
+            disconnect_called.append(True)
+
+        async def run_until_disconnected(self):
+            run_until_disconnected_called.append(True)
+
+    class DummyClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def start(self, **kw):
+            return DummyBot()
+
+    async def fake_get_chat_history(*a, **kw):
+        return None
+
+    monkeypatch.setattr(dumper, "TelegramClient", DummyClient)
+    monkeypatch.setattr(dumper, "print_bot_info", lambda me: None)
+    monkeypatch.setattr(dumper, "get_chat_history", fake_get_chat_history)
+
+    args = SimpleNamespace(
+        tor=False, token='999:fake', output=str(tmp_path), listen_only=False,
+        start_from_id=0, down=False, lookahead=0, no_listen=True
+    )
+    await dumper.main(args)
+
+    assert disconnect_called == [True]
+    assert run_until_disconnected_called == []
+

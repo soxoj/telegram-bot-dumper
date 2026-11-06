@@ -1,5 +1,7 @@
 # telegram-bot-dumper
 
+[![Documentation Status](https://readthedocs.org/projects/telegram-bot-dumper/badge/?version=latest)](https://telegram-bot-dumper.readthedocs.io/en/latest/)
+
 Easy dumping of all Telegram bot stuff.
 
 **Input**: only bot token.
@@ -12,18 +14,24 @@ This is a Python implementation.
 
 🚀 Fast [Golang version](https://github.com/soxoj/telegram-bot-dumper-go) by [ScBoln](https://github.com/ScBoln).
 
+📖 Full documentation: <https://telegram-bot-dumper.readthedocs.io>
+
 ## Web viewer
 
 **A Telegram-Web-like browser UI for a dump**: chat list, full message history with inline media, user profiles with a photo carousel, and global search across every conversation at once. **Live mode** supported: it runs the dumper in the background and streams new messages to the browser in real time.
 
+Open a conversation and choose **Download chat** to save its history, media, and
+photos as `dump_<bot_id>_<chat_id>.zip`. The archive keeps the `<bot_id>/<chat_id>/`
+directory structure and excludes other chats and bot-level files.
+
 **Use case — pentesting a leaked bot token.** Telegram bot tokens turn up constantly on an engagement — hard-coded in a mobile/desktop app, committed to a repo, or sitting in a CI log, config file, or client-side bundle. On its own a token looks like a low-severity finding; loading it here shows the real blast radius. For an internal bot (support desk, IT/DevOps helper, AI assistant) that is every employee conversation with it — internal hostnames, VPN profiles, credentials, and infrastructure details — browsable and searchable, so you can scope the impact and evidence the finding in your report.
 
-![Web viewer — dump of an internal bot](docs/webapp-corporate.png)
+![Web viewer — dump of an internal bot](docs/source/webapp-corporate.png)
 
 ### Run from a prebuilt image (Docker Hub)
 
 ```sh
-docker run --rm -p 8010:8010 -v "$PWD:/data" soxoj/telegram-bot-dumper-web
+docker run --rm -p 127.0.0.1:8010:8010 -v "$PWD:/data" soxoj/telegram-bot-dumper-web
 ```
 
 ### Or build locally
@@ -39,11 +47,11 @@ pip install -r requirements.txt
 python webapp/server.py        # serves the current directory's dumps on :8010
 ```
 
-Open <http://127.0.0.1:8010> and paste a bot token to pick its dump folder. Read-only viewing is auth-free, local, and needs no API credentials. **Live mode** additionally needs `API_ID`/`API_HASH` from [my.telegram.org](https://my.telegram.org), passed via the environment — never baked into the image:
+Open <http://127.0.0.1:8010> and paste the bot token to open its dump: it must match the token saved in that dump's `bot.json`. Read-only viewing needs no API credentials. **Live mode** additionally needs `API_ID`/`API_HASH` from [my.telegram.org](https://my.telegram.org), passed via the environment — never baked into the image:
 
 ```sh
 # one-off container
-docker run --rm -p 8010:8010 -v "$PWD:/data" \
+docker run --rm -p 127.0.0.1:8010:8010 -v "$PWD:/data" \
   -e API_ID=123456 -e API_HASH=abc... soxoj/telegram-bot-dumper-web
 
 # or with docker compose: put them in a local .env (see .env.example)
@@ -51,6 +59,18 @@ cp .env.example .env && $EDITOR .env && docker compose up
 ```
 
 `PORT` and `HOST` env vars override the defaults (`8010`, `127.0.0.1`).
+
+#### Dumping a new bot from the viewer
+
+By default the viewer only opens bots that already have a dump. Start it with `--allow-new-dumps` (`ALLOW_NEW_DUMPS=1` in Docker) and a token with no dump yet is checked with Telegram, gets its folder and `bot.json`, and live mode dumps its whole history straight into the browser. This needs `API_ID`/`API_HASH`.
+
+Anyone who can open the page can then make your server dump any bot under your `API_ID`, so the viewer refuses to start with this flag on a non-loopback `HOST`. In Docker `HOST` is always `0.0.0.0` inside the container, so add `ALLOW_PUBLIC=1` (`--allow-public`) and keep the port on loopback yourself:
+
+```sh
+docker run --rm -p 127.0.0.1:8010:8010 -v "$PWD:/data" \
+  -e API_ID=123456 -e API_HASH=abc... -e ALLOW_NEW_DUMPS=1 -e ALLOW_PUBLIC=1 \
+  soxoj/telegram-bot-dumper-web
+```
 
 ## Features
 
@@ -79,7 +99,7 @@ export API_HASH=abc...
 
 ### Quick start — full dump (default behavior)
 
-Walks ids 1..∞ upwards in batches of 200, downloading every message, all media, and all user profile photos.
+Walks ids 1..∞ upwards in batches of 200, downloading every message, all media, and all user profile photos. By default, the dumper keeps listening for new incoming messages after the dump finishes. To exit immediately after history dumping (ideal for scripts and cron jobs), pass `--no-listen`.
 
 ```sh
 ./dumper.py --token 12345678:ABCe2rPVteUWZ7wLeCqCb3CH3ilUY_fLabc
@@ -121,7 +141,20 @@ Output: `<bot_id>/users.csv` with columns `id, username, first_name, last_name, 
 
 ### Resume after a crash / FloodWait
 
-The downward walk prints `Requesting message ids X..Y ...` for every batch. If the run is interrupted, restart from the last printed lower bound:
+The downward walk saves its next batch boundary to `<bot_id>/last_message_id.txt`.
+If the run is interrupted, continue in the existing dump folder without probing again:
+
+```sh
+./dumper.py --token TOKEN --resume
+```
+
+Use the same `--output` directory as the original run, if one was set. Saved chat
+history and the session file are kept. A missing or invalid checkpoint produces
+an error before connecting. `--resume` cannot be combined with `--listen-only`
+or `--start-from-id`; it implies a downward walk.
+
+To choose a starting point manually instead, use the last printed lower bound
+from `Requesting message ids X..Y ...`:
 
 ```sh
 ./dumper.py --token TOKEN --start-from-id <Y>
