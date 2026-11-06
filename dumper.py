@@ -430,6 +430,8 @@ async def process_message(bot, m, empty_message_counter=0):
     is_outgoing_pm = (str(m_from_id) == str(bot.id)
                       and isinstance(m.peer_id, PeerUser)
                       and m_chat_id and str(m_chat_id) != str(m_from_id))
+    if is_group and m_chat_id not in all_chats:
+        await discover_chat(bot, m.peer_id, m_chat_id)
     if is_group:
         text = f'[{m.id}][from:{m_from_id}][group:{m_chat_id}][{m.date}] {message_text}'
     elif is_outgoing_pm:
@@ -460,6 +462,24 @@ async def process_message(bot, m, empty_message_counter=0):
     return False
 
 
+async def discover_chat(bot, peer, chat_id):
+    """Fetch a group/channel entity once per run (history walk path) and
+    save its info json and profile photo, like the live NewMessage handler does."""
+    if chat_id in all_chats:
+        return
+    all_chats[chat_id] = peer
+    entity = await safe_api_request(bot.get_entity(peer), f'get chat entity {chat_id}')
+    if entity is None:
+        return
+    chat_dir = os.path.join(base_path, str(chat_id))
+    if not os.path.exists(chat_dir):
+        os.mkdir(chat_dir)
+    with open(os.path.join(chat_dir, f'{chat_id}.json'), 'w') as f:
+        json.dump(entity.to_dict(), f)
+    print(f'NEW CHAT DISCOVERED: {chat_id} {chat_display_name(entity)}')
+    await save_chat_photo(bot, entity)
+
+
 async def discover_user(bot, user_id):
     if not user_id or user_id in all_users:
         return
@@ -469,7 +489,8 @@ async def discover_user(bot, user_id):
     user = full_user.users[0]
     print_user_info(user)
     save_user_info(user)
-    remove_old_text_history(user_id)
+    if not getattr(bot, 'resuming', False):
+        remove_old_text_history(user_id)
     await save_user_photos(bot, user)
     all_users[user_id] = user
     if ON_USER:
@@ -480,17 +501,17 @@ async def get_chat_history(bot, from_id=0, to_id=0, chat_id=None, lookahead=0):
     print(f'Dumping history from {from_id} to {to_id}...')
     messages = await bot(GetMessagesRequest(range(to_id, from_id)))
     empty_message_counter = 0
-    history_tail = True
+    history_tail = True  # an all-empty batch; only then do we spend lookahead or stop
     for m in messages.messages:
         is_empty = await process_message(bot, m, empty_message_counter)
         if is_empty:
             empty_message_counter += 1
         else:
             empty_message_counter = 0
+            history_tail = False
 
     if empty_message_counter:
         print(f'Empty messages x{empty_message_counter}')
-        history_tail = True
 
     save_chats_text_history()
     if not history_tail:
@@ -512,6 +533,15 @@ async def probe_max_id(bot, max_pow=9):
         if not isinstance(m, MessageEmpty):
             print(f'  hit at id={m.id}')
             highest = max(highest, m.id)
+    # powers of ten only give a lower bound: walk up until a whole batch is empty.
+    # ponytail: a gap of more than one batch of deleted ids above the hit still cuts the top off
+    while highest:
+        msgs = await bot(GetMessagesRequest(list(range(highest + 1, highest + 1 + HISTORY_DUMP_STEP))))
+        real = [m.id for m in msgs.messages if not isinstance(m, MessageEmpty)]
+        if not real or max(real) <= highest:
+            break
+        highest = max(real)
+        print(f'  found newer messages up to id={highest}')
     return highest
 
 
@@ -519,6 +549,7 @@ async def get_chat_history_down(bot, from_id, lookahead=0):
     if from_id <= 1:
         print('Reached the beginning of history.')
         return
+    save_last_message_id(from_id)
     to_id = max(0, from_id - HISTORY_DUMP_STEP)
     print(f'Requesting message ids {from_id - 1}..{to_id} (batch of {from_id - to_id}, walking down)...')
     messages = await bot(GetMessagesRequest(range(to_id, from_id)))
@@ -536,6 +567,7 @@ async def get_chat_history_down(bot, from_id, lookahead=0):
         print(f'Empty messages x{empty_message_counter}')
 
     save_chats_text_history()
+    save_last_message_id(to_id)
     if to_id <= 1:
         print('History was fully dumped (down).')
         return
@@ -584,7 +616,7 @@ def ask_bot_token():
         print('ERROR: wrong format, use: 123456789:AAAbbb...; copying the whole line from @BotFather')
 
 
-async def bot_auth(bot_token, proxy=None, output_dir=None):
+async def bot_auth(bot_token, proxy=None, output_dir=None, resume=False):
     # TODO: make not global
     global base_path
     # Name the missing variable instead of letting Telethon fail on the "Telegram" host,
@@ -606,7 +638,7 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
         # empty directory this run created, and only that one: a dump rotated to
         # <bot_id>_<timestamp> is the user's data, and it is left where it is.
         created_now = True
-    else:
+    elif not resume:
         created_now = False
         import time
         new_path = f'{base_path}_{str(int(time.time()))}'
@@ -616,11 +648,15 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
         new_session = os.path.join(base_path, f'{bot_id}.session')
         if os.path.exists(old_session):
             shutil.copyfile(old_session, new_session)
+    else:
+        # resume: an existing dump is continued in place, never rotated.
+        created_now = False
 
     # advantages of Telethon using for bots: https://github.com/telegram-mtproto/botapi-comparison
     try:
         bot = await TelegramClient(os.path.join(base_path, bot_id), API_ID, API_HASH, proxy=proxy).start(bot_token=bot_token)
         bot.id = bot_id
+        bot.resuming = resume
     except AccessTokenExpiredError:
         # An expired token and an invalid one are neither the same mistake nor the same
         # fix: revoked means the owner has to revoke and reissue, wrong means a typo.
@@ -652,7 +688,22 @@ async def bot_auth(bot_token, proxy=None, output_dir=None):
 async def main(args):
     proxy = (socks.SOCKS5, '127.0.0.1', 9050) if args.tor else None
     bot_token = args.token or ask_bot_token()
-    bot = await bot_auth(bot_token, proxy=proxy, output_dir=args.output)
+    resume = getattr(args, 'resume', False)
+    start_from_id = args.start_from_id
+    if resume:
+        directory = os.path.join(args.output or '', bot_token.split(':')[0])
+        checkpoint = os.path.join(directory, 'last_message_id.txt')
+        try:
+            with open(checkpoint, encoding='ascii') as saved:
+                start_from_id = int(saved.read().strip())
+            if start_from_id < 0:
+                raise ValueError('negative message id')
+        except (OSError, ValueError):
+            raise SystemExit(
+                f'Cannot resume: {checkpoint} is missing or invalid. '
+                'Start a downward dump with --down first.'
+            ) from None
+    bot = await bot_auth(bot_token, proxy=proxy, output_dir=args.output, resume=resume)
 
     offer_state = {'pending': args.listen_only}
 
@@ -681,8 +732,8 @@ async def main(args):
             offer_state['pending'] = False
             await offer_downward_dump(bot, event.message.id, args.lookahead)
 
-    if args.start_from_id:
-        await get_chat_history_down(bot, from_id=args.start_from_id, lookahead=args.lookahead)
+    if resume or start_from_id:
+        await get_chat_history_down(bot, from_id=start_from_id, lookahead=args.lookahead)
     elif args.listen_only:
         print("Bot history dumping disabled due to `--listen-only` flag, switching to the listen mode...")
     elif args.down:
@@ -695,12 +746,18 @@ async def main(args):
     else:
         await get_chat_history(bot, from_id=HISTORY_DUMP_STEP, to_id=0, lookahead=args.lookahead)
 
+    if getattr(args, 'no_listen', False):
+        if hasattr(bot, 'disconnect'):
+            res = bot.disconnect()
+            if asyncio.iscoroutine(res):
+                await res
+        return
+
     print('Press Ctrl+C to stop listening for new messages...')
     await bot.run_until_disconnected()
 
 
-if __name__ == '__main__':
-    sys.stdout.reconfigure(line_buffering=True)  # logs show up under nohup/systemd
+def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--token", help="Telegram bot token to check")
     parser.add_argument("--listen-only", help="Don't dump all the bot history", action="store_true")
@@ -712,6 +769,8 @@ if __name__ == '__main__':
                         default=0, type=int)
     parser.add_argument("--down", help="Walk message ids downwards (auto-probes max id if --start-from-id is not set)",
                         action="store_true")
+    parser.add_argument("--resume", help="Continue a downward dump from the saved last_message_id.txt",
+                        action="store_true")
     parser.add_argument("--no-photos", help="Skip downloading user profile photos", action="store_true")
     parser.add_argument("--no-media", help="Skip downloading message media (photos and documents); keep metadata only",
                         action="store_true")
@@ -721,7 +780,24 @@ if __name__ == '__main__':
                         action="store_true")
     parser.add_argument("--tor", help="enable Tor socks proxy", action="store_true")
     parser.add_argument("--output", help="Directory to save the dump (default: ./<bot_id>)")
-    args = parser.parse_args()
+    parser.add_argument("--no-listen", help="Exit after dumping history instead of listening for new messages",
+                        action="store_true")
+    return parser
+
+
+def parse_args(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.listen_only and args.no_listen:
+        parser.error("Cannot combine --listen-only with --no-listen")
+    if args.resume and (args.listen_only or args.start_from_id):
+        parser.error("Cannot combine --resume with --listen-only or --start-from-id")
+    return args
+
+
+if __name__ == '__main__':
+    sys.stdout.reconfigure(line_buffering=True)  # logs show up under nohup/systemd
+    args = parse_args()
 
     NO_PHOTOS = args.no_photos
     USERS_CSV = args.users_csv

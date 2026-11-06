@@ -1,40 +1,51 @@
 #!/usr/bin/env python3
 """Telegram-Web-like viewer + live dumper over dumper.py output.
 
-Run:  python webapp/server.py [DUMP_ROOT]
+Run:  python webapp/server.py [DUMP_ROOT] [--allow-new-dumps [--allow-public]]
 Open: http://127.0.0.1:8010  and paste a bot token.
 
 Hybrid: existing folder data is read on login; after /api/start the real
 dumper.py runs in a background thread and streams each processed message
 straight to the browser over SSE (no console scraping) while it writes to the
 folders as usual. The token's id part (before ':') selects the dump folder.
-Read-only viewing is auth-free & local; add sessions if this leaves localhost.
+Login checks the token against the one saved in bot.json and sets a session
+cookie; every /api and /file request needs it. With --allow-new-dumps a token
+with no dump yet is checked with Telegram, gets a folder and bot.json, and the
+live mode then dumps its whole history.
 """
 import os
 import re
 import sys
 import csv
 import io
+import hmac
 import json
+import secrets
+import shutil
 import queue
 import asyncio
 import threading
 import mimetypes
+import zipfile
 from urllib.parse import urlparse, parse_qs, unquote
+from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)  # where dumper.py lives
-_arg = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('--') else None
+_arg = next((a for a in sys.argv[1:] if not a.startswith('--')), None)
 DUMP_ROOT = os.path.abspath(_arg) if _arg else REPO_ROOT
 PORT = int(os.environ.get('PORT', '8010'))
 HOST = os.environ.get('HOST', '127.0.0.1')  # set HOST=0.0.0.0 to expose (e.g. in Docker)
+ALLOW_NEW_DUMPS = '--allow-new-dumps' in sys.argv or os.environ.get('ALLOW_NEW_DUMPS') == '1'
+ALLOW_PUBLIC = '--allow-public' in sys.argv or os.environ.get('ALLOW_PUBLIC') == '1'
+_new_dump_lock = threading.Lock()
 
 # [id] [from_id][optional to:/from:/group:] ... [date] text...   (greedy middle backtracks to release the date bracket)
 MSG_RE = re.compile(r'^\[(\d+)\]((?:\[[^\]]*\])*)\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[^\]]*)\]\s?(.*)$')
 MEDIA_RE = re.compile(r'^(?:Photo|Document|Photo of chat was changed): media/(.+)$')
 URL_RE = re.compile(r'https?://[^\s<>()"\']+')
-USER_FIELDS = ('id', 'first_name', 'last_name', 'username', 'bot', 'premium', 'verified', 'scam', 'fake', 'phone')
+USER_FIELDS = ('id', 'title', 'first_name', 'last_name', 'username', 'bot', 'premium', 'verified', 'scam', 'fake', 'phone')
 
 
 def _ids(middle):
@@ -88,6 +99,9 @@ def load_user(chat_dir, chat_id):
 
 
 def display_name(user, chat_id):
+    title = user.get('title')
+    if title:
+        return title
     name = ' '.join(x for x in (user.get('first_name'), user.get('last_name')) if x).strip()
     return name or (('@' + user['username']) if user.get('username') else f'Chat {chat_id}')
 
@@ -193,13 +207,48 @@ def links_csv(bot_id):
     return out.getvalue()
 
 
+def new_dump(token, bot_id):
+    """Check the token with Telegram and save bot.json like dumper.py does; error text or None."""
+    sys.path.insert(0, REPO_ROOT)
+    import dumper as D
+    if not D.API_ID or not D.API_HASH:
+        return 'Set API_ID and API_HASH to dump a new bot.'
+    root = os.path.join(DUMP_ROOT, bot_id)
+
+    async def check():
+        from telethon import TelegramClient
+        client = TelegramClient(os.path.join(root, bot_id), D.API_ID, D.API_HASH)
+        await client.start(bot_token=token)
+        try:
+            info = (await client.get_me()).to_dict()
+        finally:
+            await client.disconnect()
+        info['token'] = token
+        with open(os.path.join(root, 'bot.json'), 'w') as f:
+            json.dump(info, f, default=str)
+
+    os.makedirs(root)
+    try:
+        asyncio.run(check())
+    except Exception as e:
+        shutil.rmtree(root, ignore_errors=True)  # no half-made folder for a rejected token
+        return f'Telegram rejected the token: {e}'
+    return None
+
+
 def login(token):
     if ':' not in token or not token.split(':')[0].isdigit():
         return None, 'Invalid token format (expected <id>:<hash>).'
     bot_id = token.split(':')[0]
     root = os.path.join(DUMP_ROOT, bot_id)
-    if not os.path.isdir(root):
-        return None, f'No dump found for bot {bot_id} in {DUMP_ROOT}.'
+    with _new_dump_lock:  # two logins for one new bot must not both create the folder
+        if not os.path.isdir(root):
+            if not ALLOW_NEW_DUMPS:
+                return None, (f'No dump for bot {bot_id} in {DUMP_ROOT}. Run dumper.py first, '
+                              'or start the viewer with --allow-new-dumps to dump it from here.')
+            err = new_dump(token, bot_id)
+            if err:
+                return None, err
     bot = {}
     bp = os.path.join(root, 'bot.json')
     if os.path.exists(bp):
@@ -207,6 +256,9 @@ def login(token):
             bot = json.load(open(bp, encoding='utf-8'))
         except (OSError, ValueError):
             bot = {}
+    saved = str(bot.get('token') or '')
+    if not saved or not hmac.compare_digest(saved.encode(), token.encode()):
+        return None, "Token doesn't match the one saved in this dump's bot.json."
     return {
         'botId': bot_id,
         'bot': {
@@ -228,29 +280,66 @@ def safe_path(bot_id, rel):
     return full
 
 
+def chat_archive(bot_id, chat_id):
+    """Zip one chat's files without following symlinks into other directories."""
+    bot_dir = os.path.join(DUMP_ROOT, bot_id)
+    chat_dir = os.path.join(bot_dir, chat_id)
+    source = safe_path(bot_id, chat_id)
+    if (not source or not os.path.isdir(source)
+            or os.path.islink(bot_dir) or os.path.islink(chat_dir)):
+        raise FileNotFoundError('chat not found')
+    body = io.BytesIO()
+    with zipfile.ZipFile(body, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for root, directories, files in os.walk(source, followlinks=False):
+            directories[:] = sorted(
+                name for name in directories if not os.path.islink(os.path.join(root, name))
+            )
+            relative = os.path.relpath(root, source)
+            prefix = os.path.join(bot_id, chat_id)
+            if relative != '.':
+                prefix = os.path.join(prefix, relative)
+            archive.write(root, prefix)
+            for name in sorted(files):
+                full = os.path.join(root, name)
+                if not os.path.islink(full) and os.path.isfile(full):
+                    archive.write(full, os.path.join(prefix, name))
+    return body.getvalue()
+
+
+def is_private(path):
+    """bot.json holds the bot token, *.session the Telethon auth key: never serve them."""
+    name = os.path.basename(path)
+    return name == 'bot.json' or name.endswith(('.session', '.session-journal'))
+
+
+SESSIONS = {}  # cookie value -> bot_id. ponytail: in-memory, a server restart logs everyone out
+
+
 # ---- live dumping (background thread) + SSE broker -------------------------
 
 class Broker:
-    """Fan out events to all connected SSE clients. Thread-safe."""
+    """Fan out the live bot's events to the SSE clients logged in to that bot. Thread-safe."""
     def __init__(self):
-        self.clients = set()
+        self.clients = {}  # queue -> bot_id of the session that opened the stream
         self.lock = threading.Lock()
 
     def publish(self, event):
         data = ('data: ' + json.dumps(event, default=str) + '\n\n').encode('utf-8')
+        bot = _live['bot']
         with self.lock:
-            for q in list(self.clients):
-                q.put(data)
+            for q, client_bot in list(self.clients.items()):
+                if client_bot == bot:
+                    q.put(data)
 
-    def subscribe(self):
+    def subscribe(self, bot_id):
         q = queue.Queue()
         with self.lock:
-            self.clients.add(q)
+            self.clients[q] = bot_id
         return q
 
     def unsubscribe(self, q):
         with self.lock:
-            self.clients.discard(q)
+            self.clients.pop(q, None)
 
 
 broker = Broker()
@@ -367,8 +456,8 @@ def _run_live(token, bot_id):
     except Exception as e:
         broker.publish({'type': 'error', 'error': str(e)})
     finally:
+        broker.publish({'type': 'status', 'status': 'stopped'})  # before clearing: publish routes by _live['bot']
         _live['bot'] = None
-        broker.publish({'type': 'status', 'status': 'stopped'})
 
 
 def start_live(token):
@@ -394,9 +483,11 @@ class Handler(BaseHTTPRequestHandler):
         except (ConnectionResetError, BrokenPipeError):
             pass  # client (EventSource) dropped the socket; nothing to log
 
-    def _json(self, obj, code=200):
+    def _json(self, obj, code=200, cookie=None):
         body = json.dumps(obj, default=str).encode('utf-8')
         self.send_response(code)
+        if cookie:
+            self.send_header('Set-Cookie', f'sid={cookie}; HttpOnly; SameSite=Strict; Path=/')
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
@@ -415,6 +506,14 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path in ('/', '/index.html'):
             return self._send_file(os.path.join(HERE, 'index.html'))
+        if u.path.startswith(('/api/', '/file/')):
+            if u.path.startswith('/file/'):
+                bot = unquote(u.path[len('/file/'):]).split('/', 1)[0]
+            else:
+                bot = parse_qs(u.query).get('bot', [''])[0]
+            authed = self._session_bot()
+            if not authed or (u.path != '/api/stream' and bot != authed):
+                return self._json({'error': 'login required'}, 401)
         if u.path == '/api/messages':
             q = parse_qs(u.query)
             bot_id, chat = q.get('bot', [''])[0], q.get('chat', [''])[0]
@@ -436,6 +535,24 @@ class Handler(BaseHTTPRequestHandler):
             if not bot_id.isdigit():
                 return self._json({'error': 'bad params'}, 400)
             return self._csv(links_csv(bot_id), f'links_{bot_id}.csv')
+        if u.path == '/api/export':
+            q = parse_qs(u.query)
+            bot_id, chat = q.get('bot', [''])[0], q.get('chat', [''])[0]
+            if not re.fullmatch(r'[0-9]+', bot_id) or not re.fullmatch(r'[0-9]+', chat):
+                return self._json({'error': 'bad params'}, 400)
+            try:
+                body = chat_archive(bot_id, chat)
+            except FileNotFoundError:
+                return self._json({'error': 'chat not found'}, 404)
+            except OSError:
+                return self._json({'error': 'could not export chat'}, 500)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Disposition', f'attachment; filename="dump_{bot_id}_{chat}.zip"')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if u.path == '/api/profile':
             q = parse_qs(u.query)
             bot_id, chat = q.get('bot', [''])[0], q.get('chat', [''])[0]
@@ -450,7 +567,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) != 2 or not parts[0].isdigit():
                 return self._json({'error': 'not found'}, 404)
             full = safe_path(parts[0], parts[1])
-            if not full or not os.path.isfile(full):
+            if not full or is_private(full) or not os.path.isfile(full):
                 return self._json({'error': 'not found'}, 404)
             return self._send_file(full)
         return self._json({'error': 'not found'}, 404)
@@ -462,15 +579,25 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get('Content-Length', 0))
         try:
             token = json.loads(self.rfile.read(n) or b'{}').get('token', '').strip()
-        except ValueError:
+        except (ValueError, AttributeError):  # not JSON, not an object, or token not a string
             return self._json({'error': 'bad request'}, 400)
         if path == '/api/start':
+            if self._session_bot() != token.split(':')[0]:
+                return self._json({'error': 'login required'}, 401)
             return self._json(start_live(token))
         data, err = login(token)
-        return self._json(data) if data else self._json({'error': err}, 404)
+        if not data:
+            return self._json({'error': err}, 401)
+        sid = secrets.token_urlsafe(32)
+        SESSIONS[sid] = data['botId']
+        return self._json(data, cookie=sid)
+
+    def _session_bot(self):
+        c = SimpleCookie(self.headers.get('Cookie', ''))
+        return SESSIONS.get(c['sid'].value) if 'sid' in c else None
 
     def _stream(self):
-        q = broker.subscribe()
+        q = broker.subscribe(self._session_bot())
         try:
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
@@ -548,6 +675,9 @@ if __name__ == '__main__':
     if '--selftest' in sys.argv:
         selftest()
         sys.exit()
+    if ALLOW_NEW_DUMPS and HOST not in ('127.0.0.1', '::1', 'localhost') and not ALLOW_PUBLIC:
+        sys.exit(f'--allow-new-dumps lets anyone who can open this page dump any bot under your API_ID, '
+                 f'and HOST={HOST} is not loopback. Add --allow-public (ALLOW_PUBLIC=1) if you mean it.')
     bots = sorted(n for n in os.listdir(DUMP_ROOT)
                   if n.isdigit() and os.path.exists(os.path.join(DUMP_ROOT, n, 'bot.json')))
     print(f'Dump root: {DUMP_ROOT}')
