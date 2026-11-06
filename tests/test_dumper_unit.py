@@ -1,5 +1,6 @@
 """Unit tests for new logic added to dumper.py."""
 import csv
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -36,10 +37,16 @@ class FakeBot:
         self.id = id
         self.calls = []
         self.downloaded_photos = []
+        self.entity = None
+        self.entity_calls = []
 
     async def __call__(self, request):
         self.calls.append(request)
         return self.response
+
+    async def get_entity(self, peer):
+        self.entity_calls.append(peer)
+        return self.entity
 
     async def download_profile_photo(self, entity, file=None):
         self.downloaded_photos.append((entity, file))
@@ -260,6 +267,51 @@ async def test_process_message_supergroup_format(monkeypatch, capsys):
     await dumper.process_message(FakeBot(), m)
     out = capsys.readouterr().out
     assert "[5][from:42][group:8888][2026-04-01] x" in out
+
+
+# ---------- history walk chat discovery ----------
+
+def _group_entity(chat_id, title):
+    entity = SimpleNamespace(
+        id=chat_id, title=title, username=None,
+        first_name=None, last_name=None,
+        to_dict=lambda: {'id': chat_id, 'title': title},
+    )
+    return entity
+
+
+@pytest.mark.asyncio
+async def test_history_walk_saves_chat_info_and_photo(tmp_path):
+    bot = FakeBot()
+    bot.entity = _group_entity(777, 'Test Group')
+    m = _message(5, PeerUser(user_id=42), PeerChat(chat_id=777), text="ho")
+    await dumper.process_message(bot, m)
+
+    info_path = tmp_path / '777' / '777.json'
+    assert info_path.exists()
+    assert json.load(open(info_path))['title'] == 'Test Group'
+    assert bot.downloaded_photos, 'chat photo should be saved'
+    assert bot.entity_calls == [PeerChat(chat_id=777)]
+
+
+@pytest.mark.asyncio
+async def test_history_walk_fetches_entity_once_per_chat(tmp_path):
+    bot = FakeBot()
+    bot.entity = _group_entity(777, 'Test Group')
+    await dumper.process_message(bot, _message(5, PeerUser(user_id=42), PeerChat(chat_id=777)))
+    await dumper.process_message(bot, _message(6, PeerUser(user_id=43), PeerChat(chat_id=777)))
+    assert len(bot.entity_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_history_walk_respects_no_photos(tmp_path, monkeypatch):
+    monkeypatch.setattr(dumper, "NO_PHOTOS", True)
+    bot = FakeBot()
+    bot.entity = _group_entity(777, 'Test Group')
+    await dumper.process_message(bot, _message(5, PeerUser(user_id=42), PeerChat(chat_id=777)))
+
+    assert (tmp_path / '777' / '777.json').exists(), 'info json should still be saved'
+    assert not bot.downloaded_photos, 'photo download should be skipped with --no-photos'
 
 
 # ---------- process_message NO_HISTORY ----------
