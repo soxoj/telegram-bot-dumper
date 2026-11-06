@@ -1,7 +1,7 @@
 # Pinned on purpose: the sibling Maigret / socid_extractor docs leave these
 # open and their RTD builds are only reproducible until the next release of
 # any of them. Bump deliberately.
-sphinx>=7,<9
+sphinx>=9.2.0,<10
 sphinx_rtd_theme>=3.1.0,<4
 sphinx-copybutton>=0.5.2
 sphinx-intl>=2.4.0
