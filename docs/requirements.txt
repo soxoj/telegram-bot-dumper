@@ -2,6 +2,6 @@
 # open and their RTD builds are only reproducible until the next release of
 # any of them. Bump deliberately.
 sphinx>=7,<9
-sphinx_rtd_theme>=2,<4
-sphinx-copybutton>=0.5
-sphinx-intl>=2.1
+sphinx_rtd_theme>=3.1.0,<4
+sphinx-copybutton>=0.5.2
+sphinx-intl>=2.4.0

@@ -18,7 +18,7 @@ from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.types import MessageService, MessageEmpty, User
 from telethon.tl.types import PeerUser, PeerChat, PeerChannel
-from telethon.errors.rpcerrorlist import AccessTokenExpiredError, RpcCallFailError
+from telethon.errors.rpcerrorlist import AccessTokenExpiredError, AccessTokenInvalidError, RpcCallFailError
 from telethon.tl.types import (
     MessageMediaGeo, MessageMediaPhoto, MessageMediaDocument, MessageMediaContact,
     MessageMediaPoll, MessageMediaVenue, MessageMediaDice, MessageMediaGame,
@@ -37,6 +37,8 @@ from telethon.tl.types import (
 
 # Telegram API credentials from https://my.telegram.org — pass via env (or -e in Docker).
 # Never hard-code real values here: this file is public and git history is forever.
+# Left at their defaults here, so that importing this module does not fail on a machine
+# without credentials. bot_auth checks them before it reaches Telegram.
 API_ID = int(os.environ.get('API_ID') or 0)
 API_HASH = os.environ.get('API_HASH', '')
 
@@ -50,6 +52,7 @@ LOOKAHEAD_STEP_COUNT = 0
 all_chats = {}
 all_users = {}
 messages_by_chat = {}
+message_counts_by_chat = {}
 base_path = ''
 NO_PHOTOS = False
 USERS_CSV = False
@@ -209,6 +212,36 @@ def save_chats_text_history():
         save_text_history(m_chat_id, new_messages)
         messages_by_chat[m_chat_id]['history'] += new_messages
         messages_by_chat[m_chat_id]['buf'] = []
+
+
+def get_dump_summary():
+    user_ids = {str(user_id) for user_id in all_users}
+    message_count = sum(message_counts_by_chat.values())
+
+    media_count = 0
+    if os.path.isdir(base_path):
+        for root, _, filenames in os.walk(base_path):
+            relative_parts = os.path.relpath(root, base_path).split(os.sep)
+            in_media_dir = 'media' in relative_parts
+            for filename in filenames:
+                if in_media_dir:
+                    media_count += 1
+                elif root != base_path and not (
+                    filename.endswith('.json')
+                    or filename.endswith('_history.txt')
+                    or filename in ('users.csv', 'last_message_id.txt')
+                ):
+                    media_count += 1
+
+    return len(message_counts_by_chat), len(user_ids), message_count, media_count
+
+
+def print_dump_summary():
+    chat_count, user_count, message_count, media_count = get_dump_summary()
+    print(
+        f'Done: {chat_count} chats, {user_count} users, '
+        f'{message_count} messages, {media_count} media files'
+    )
 
 
 def get_chat_id(message, bot_id):
@@ -428,6 +461,8 @@ async def process_message(bot, m, empty_message_counter=0):
     is_outgoing_pm = (str(m_from_id) == str(bot.id)
                       and isinstance(m.peer_id, PeerUser)
                       and m_chat_id and str(m_chat_id) != str(m_from_id))
+    if is_group and m_chat_id not in all_chats:
+        await discover_chat(bot, m.peer_id, m_chat_id)
     if is_group:
         text = f'[{m.id}][from:{m_from_id}][group:{m_chat_id}][{m.date}] {message_text}'
     elif is_outgoing_pm:
@@ -440,6 +475,7 @@ async def process_message(bot, m, empty_message_counter=0):
         if not m_chat_id in messages_by_chat:
             messages_by_chat[m_chat_id] = {'buf': [], 'history': []}
         messages_by_chat[m_chat_id]['buf'].append(text)
+    message_counts_by_chat[m_chat_id] = message_counts_by_chat.get(m_chat_id, 0) + 1
 
     if ON_MESSAGE:
         ON_MESSAGE(m_chat_id, text)
@@ -456,6 +492,24 @@ async def process_message(bot, m, empty_message_counter=0):
         await discover_user(bot, user_to_resolve)
 
     return False
+
+
+async def discover_chat(bot, peer, chat_id):
+    """Fetch a group/channel entity once per run (history walk path) and
+    save its info json and profile photo, like the live NewMessage handler does."""
+    if chat_id in all_chats:
+        return
+    all_chats[chat_id] = peer
+    entity = await safe_api_request(bot.get_entity(peer), f'get chat entity {chat_id}')
+    if entity is None:
+        return
+    chat_dir = os.path.join(base_path, str(chat_id))
+    if not os.path.exists(chat_dir):
+        os.mkdir(chat_dir)
+    with open(os.path.join(chat_dir, f'{chat_id}.json'), 'w') as f:
+        json.dump(entity.to_dict(), f)
+    print(f'NEW CHAT DISCOVERED: {chat_id} {chat_display_name(entity)}')
+    await save_chat_photo(bot, entity)
 
 
 async def discover_user(bot, user_id):
@@ -573,21 +627,52 @@ async def offer_downward_dump(bot, message_id, lookahead):
     )
     if answer.strip().lower() in ('', 'y', 'yes'):
         await get_chat_history_down(bot, from_id=message_id + 1, lookahead=lookahead)
+        print_dump_summary()
         print('Downward dump finished. Continuing to listen for new messages...')
         return True
     print(f'Skipped. You can rerun later with: --start-from-id {message_id}')
     return False
 
 
+def ask_bot_token():
+    # The interactive prompt used to accept a paste with a newline or a space and hand the
+    # mess to Telethon, which then failed somewhere further away. Ask again here instead,
+    # where the mistake is easy to name. EOF (piped input) ends the loop.
+    while True:
+        try:
+            token = input('Enter token bot: ').strip()
+        except EOFError:
+            print('ERROR: token was not provided, and there is no input to read. Pass it with --token')
+            sys.exit(1)
+        if ':' in token:
+            return token
+        print('ERROR: wrong format, use: 123456789:AAAbbb...; copying the whole line from @BotFather')
+
+
 async def bot_auth(bot_token, proxy=None, output_dir=None, resume=False):
     # TODO: make not global
     global base_path
+    # Name the missing variable instead of letting Telethon fail on the "Telegram" host,
+    # which reads like a network or firewall problem.
+    if not API_ID or not API_HASH:
+        print('ERROR: API_ID and API_HASH are not set. Get them from https://my.telegram.org and pass them as environment variables, e.g. API_ID=123456 API_HASH=abcdef python dumper.py')
+        sys.exit(1)
+    if ':' not in bot_token:
+        print("ERROR: token must look like 123456:ABC-DEF...; check the value passed")
+        sys.exit(1)
     bot_id = bot_token.split(':')[0]
     if output_dir:
         base_path = os.path.join(output_dir, bot_id)
     else:
         base_path = bot_id
-    if os.path.exists(base_path) and not resume:
+    if not os.path.exists(base_path):
+        os.makedirs(base_path, exist_ok=True)
+        # True only when the directory itself is new. An invalid token removes the
+        # empty directory this run created, and only that one: a dump rotated to
+        # <bot_id>_<timestamp> is the user's data, and it is left where it is.
+        created_now = True
+    elif not resume:
+        created_now = False
         import time
         new_path = f'{base_path}_{str(int(time.time()))}'
         os.rename(base_path, new_path)
@@ -597,16 +682,29 @@ async def bot_auth(bot_token, proxy=None, output_dir=None, resume=False):
         if os.path.exists(old_session):
             shutil.copyfile(old_session, new_session)
     else:
-        os.makedirs(base_path, exist_ok=True)
+        # resume: an existing dump is continued in place, never rotated.
+        created_now = False
 
     # advantages of Telethon using for bots: https://github.com/telegram-mtproto/botapi-comparison
     try:
         bot = await TelegramClient(os.path.join(base_path, bot_id), API_ID, API_HASH, proxy=proxy).start(bot_token=bot_token)
         bot.id = bot_id
         bot.resuming = resume
-    except AccessTokenExpiredError as e:
-        print("Token has expired!")
-        sys.exit()
+    except AccessTokenExpiredError:
+        # An expired token and an invalid one are neither the same mistake nor the same
+        # fix: revoked means the owner has to revoke and reissue, wrong means a typo.
+        print('ERROR: bot token has expired, it was revoked. Issue a new one with @BotFather and try again.')
+        sys.exit(1)
+    except AccessTokenInvalidError:
+        # Nothing useful is in the directory: the client never started, so the only
+        # file is the session Telethon made on the way to the failed login. Leaving
+        # it behind makes the next run rotate an empty dump and mistake the bot for
+        # a previously used one. Only the created directory is removed; a previous
+        # dump already rotated to <bot_id>_<timestamp> is left where it is.
+        if created_now:
+            shutil.rmtree(base_path, ignore_errors=True)
+        print('ERROR: bot token is invalid or corrupted. Use: 123456789:AAAbbb...; check that you copied the whole string and the bot ID matches')
+        sys.exit(1)
 
     me = await bot.get_me()
     print_bot_info(me)
@@ -622,7 +720,7 @@ async def bot_auth(bot_token, proxy=None, output_dir=None, resume=False):
 
 async def main(args):
     proxy = (socks.SOCKS5, '127.0.0.1', 9050) if args.tor else None
-    bot_token = args.token or input("Enter token bot: ")
+    bot_token = args.token or ask_bot_token()
     resume = getattr(args, 'resume', False)
     start_from_id = args.start_from_id
     if resume:
@@ -641,6 +739,7 @@ async def main(args):
     bot = await bot_auth(bot_token, proxy=proxy, output_dir=args.output, resume=resume)
 
     offer_state = {'pending': args.listen_only}
+    did_dump = bool(args.start_from_id) or not args.listen_only
 
     @bot.on(events.NewMessage)
     async def save_new_user_history(event):
@@ -680,6 +779,9 @@ async def main(args):
             print('No messages found via id probe. Nothing to dump downwards.')
     else:
         await get_chat_history(bot, from_id=HISTORY_DUMP_STEP, to_id=0, lookahead=args.lookahead)
+
+    if did_dump:
+        print_dump_summary()
 
     if getattr(args, 'no_listen', False):
         if hasattr(bot, 'disconnect'):

@@ -15,6 +15,11 @@ def reset_module_state(monkeypatch, tmp_path):
     for name in ("all_chats", "all_users", "messages_by_chat"):
         monkeypatch.setattr(dumper, name, {})
     monkeypatch.setattr(dumper, "NO_HISTORY", False)
+    # main() reaches bot_auth, which refuses to run without a credential pair
+    # (so a missing one is named rather than left to Telethon). These tests are
+    # about the live handler, not the credentials, so give it a pair.
+    monkeypatch.setattr(dumper, "API_ID", 123456)
+    monkeypatch.setattr(dumper, "API_HASH", "abcdef0123456789")
 
 
 class FakeBot:

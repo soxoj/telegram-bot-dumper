@@ -1,5 +1,6 @@
 """Unit tests for new logic added to dumper.py."""
 import csv
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -17,10 +18,13 @@ from telethon.tl.types import (
 @pytest.fixture(autouse=True)
 def reset_module_state(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(dumper, "API_ID", 123456)
+    monkeypatch.setattr(dumper, "API_HASH", "abcdef")
     monkeypatch.setattr(dumper, "base_path", str(tmp_path))
     monkeypatch.setattr(dumper, "all_chats", {})
     monkeypatch.setattr(dumper, "all_users", {})
     monkeypatch.setattr(dumper, "messages_by_chat", {})
+    monkeypatch.setattr(dumper, "message_counts_by_chat", {})
     monkeypatch.setattr(dumper, "NO_PHOTOS", False)
     monkeypatch.setattr(dumper, "USERS_CSV", False)
     monkeypatch.setattr(dumper, "NO_MEDIA", False)
@@ -36,10 +40,16 @@ class FakeBot:
         self.id = id
         self.calls = []
         self.downloaded_photos = []
+        self.entity = None
+        self.entity_calls = []
 
     async def __call__(self, request):
         self.calls.append(request)
         return self.response
+
+    async def get_entity(self, peer):
+        self.entity_calls.append(peer)
+        return self.entity
 
     async def download_profile_photo(self, entity, file=None):
         self.downloaded_photos.append((entity, file))
@@ -217,6 +227,63 @@ def test_save_chats_text_history_skips_empty_buf(monkeypatch, tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+# ---------- dump summary ----------
+
+def test_get_dump_summary_empty():
+    assert dumper.get_dump_summary() == (0, 0, 0, 0)
+
+
+def test_get_dump_summary_counts_in_memory_state_and_media(monkeypatch, tmp_path):
+    monkeypatch.setattr(dumper, "all_chats", {100: object(), 200: object()})
+    monkeypatch.setattr(dumper, "all_users", {1: object(), 2: object()})
+    monkeypatch.setattr(
+        dumper,
+        "messages_by_chat",
+        {
+            "100": {"history": ["first", "second"], "buf": ["third"]},
+            "300": {"history": ["fourth"], "buf": []},
+        },
+    )
+    monkeypatch.setattr(dumper, "message_counts_by_chat", {"100": 3, "300": 1})
+
+    first_media_dir = tmp_path / "100" / "media"
+    first_media_dir.mkdir(parents=True)
+    (first_media_dir / "photo.jpg").write_bytes(b"photo")
+    (tmp_path / "100" / "profile.jpg").write_bytes(b"profile")
+    nested_media_dir = tmp_path / "300" / "media" / "documents"
+    nested_media_dir.mkdir(parents=True)
+    (nested_media_dir / "report.pdf").write_bytes(b"document")
+    (tmp_path / "bot.json").write_text("{}")
+    (tmp_path / "100" / "100.json").write_text("{}")
+    (tmp_path / "100" / "100_history.txt").write_text("first\nsecond\n")
+
+    assert dumper.get_dump_summary() == (2, 2, 4, 3)
+
+
+def test_get_dump_summary_counts_messages_without_history(monkeypatch):
+    monkeypatch.setattr(dumper, "message_counts_by_chat", {"100": 2})
+    monkeypatch.setattr(dumper, "messages_by_chat", {})
+    assert dumper.get_dump_summary() == (1, 0, 2, 0)
+
+
+def test_get_dump_summary_does_not_double_count_marked_chat_id(monkeypatch):
+    monkeypatch.setattr(dumper, "all_chats", {-1001234567: object()})
+    monkeypatch.setattr(
+        dumper,
+        "messages_by_chat",
+        {"1234567": {"history": ["one"], "buf": []}},
+    )
+    monkeypatch.setattr(dumper, "message_counts_by_chat", {"1234567": 1})
+    assert dumper.get_dump_summary() == (1, 0, 1, 0)
+
+
+def test_print_dump_summary(capsys):
+    dumper.print_dump_summary()
+    assert capsys.readouterr().out == (
+        "Done: 0 chats, 0 users, 0 messages, 0 media files\n"
+    )
+
+
 # ---------- process_message text format ----------
 
 def _message(message_id, from_peer, peer_id, text="hi"):
@@ -262,6 +329,51 @@ async def test_process_message_supergroup_format(monkeypatch, capsys):
     assert "[5][from:42][group:8888][2026-04-01] x" in out
 
 
+# ---------- history walk chat discovery ----------
+
+def _group_entity(chat_id, title):
+    entity = SimpleNamespace(
+        id=chat_id, title=title, username=None,
+        first_name=None, last_name=None,
+        to_dict=lambda: {'id': chat_id, 'title': title},
+    )
+    return entity
+
+
+@pytest.mark.asyncio
+async def test_history_walk_saves_chat_info_and_photo(tmp_path):
+    bot = FakeBot()
+    bot.entity = _group_entity(777, 'Test Group')
+    m = _message(5, PeerUser(user_id=42), PeerChat(chat_id=777), text="ho")
+    await dumper.process_message(bot, m)
+
+    info_path = tmp_path / '777' / '777.json'
+    assert info_path.exists()
+    assert json.load(open(info_path))['title'] == 'Test Group'
+    assert bot.downloaded_photos, 'chat photo should be saved'
+    assert bot.entity_calls == [PeerChat(chat_id=777)]
+
+
+@pytest.mark.asyncio
+async def test_history_walk_fetches_entity_once_per_chat(tmp_path):
+    bot = FakeBot()
+    bot.entity = _group_entity(777, 'Test Group')
+    await dumper.process_message(bot, _message(5, PeerUser(user_id=42), PeerChat(chat_id=777)))
+    await dumper.process_message(bot, _message(6, PeerUser(user_id=43), PeerChat(chat_id=777)))
+    assert len(bot.entity_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_history_walk_respects_no_photos(tmp_path, monkeypatch):
+    monkeypatch.setattr(dumper, "NO_PHOTOS", True)
+    bot = FakeBot()
+    bot.entity = _group_entity(777, 'Test Group')
+    await dumper.process_message(bot, _message(5, PeerUser(user_id=42), PeerChat(chat_id=777)))
+
+    assert (tmp_path / '777' / '777.json').exists(), 'info json should still be saved'
+    assert not bot.downloaded_photos, 'photo download should be skipped with --no-photos'
+
+
 # ---------- process_message NO_HISTORY ----------
 
 @pytest.mark.asyncio
@@ -271,6 +383,7 @@ async def test_process_message_no_history_skips_buffer(monkeypatch):
     m = _message(5, PeerUser(user_id=42), PeerUser(user_id=42))
     await dumper.process_message(FakeBot(), m)
     assert dumper.messages_by_chat == {}
+    assert dumper.message_counts_by_chat == {"42": 1}
 
 
 @pytest.mark.asyncio
