@@ -10,6 +10,8 @@ import dumper
 @pytest.fixture(autouse=True)
 def isolated_dump(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(dumper, "API_ID", 123456)
+    monkeypatch.setattr(dumper, "API_HASH", "abcdef")
     for name in ("all_chats", "all_users", "messages_by_chat"):
         monkeypatch.setattr(dumper, name, {})
     monkeypatch.setattr(dumper, "base_path", str(tmp_path))

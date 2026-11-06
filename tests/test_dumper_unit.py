@@ -18,6 +18,8 @@ from telethon.tl.types import (
 @pytest.fixture(autouse=True)
 def reset_module_state(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(dumper, "API_ID", 123456)
+    monkeypatch.setattr(dumper, "API_HASH", "abcdef")
     monkeypatch.setattr(dumper, "base_path", str(tmp_path))
     monkeypatch.setattr(dumper, "all_chats", {})
     monkeypatch.setattr(dumper, "all_users", {})
