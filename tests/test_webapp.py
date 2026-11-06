@@ -46,6 +46,108 @@ def test_export_links_csv_collects_links_with_sender_ids(tmp_path):
     ]
 
 
+def test_clean_url_parentheses_and_punctuation():
+    server = _load()
+    clean = server.clean_url
+
+    # 1. Balanced parentheses in URLs are preserved
+    assert clean('https://en.wikipedia.org/wiki/Python_(programming_language)') == (
+        'https://en.wikipedia.org/wiki/Python_(programming_language)'
+    )
+    assert clean('https://example.com/wiki/Foo_(bar_(baz))') == 'https://example.com/wiki/Foo_(bar_(baz))'
+    assert clean('https://example.org/path(1)(2)') == 'https://example.org/path(1)(2)'
+    assert clean('https://example.com/search?q=(foo+bar)') == 'https://example.com/search?q=(foo+bar)'
+
+    # Balanced parentheses preserved even when an unmatched closing parenthesis appears earlier
+    assert clean('https://example.com/foo:)_bar_(baz)') == 'https://example.com/foo:)_bar_(baz)'
+    assert clean('https://example.com/foo:)_bar_(baz))') == 'https://example.com/foo:)_bar_(baz)'
+
+    # 2. Unmatched trailing closing parentheses are removed
+    assert clean('https://example.com)') == 'https://example.com'
+    assert clean('https://en.wikipedia.org/wiki/Python_(programming_language))') == (
+        'https://en.wikipedia.org/wiki/Python_(programming_language)'
+    )
+    assert clean('https://en.wikipedia.org/wiki/Python_(programming_language)))') == (
+        'https://en.wikipedia.org/wiki/Python_(programming_language)'
+    )
+    assert clean('https://example.com/wiki/Foo_(bar_(baz)))') == 'https://example.com/wiki/Foo_(bar_(baz))'
+    assert clean('https://example.com/search?q=(foo+bar))') == 'https://example.com/search?q=(foo+bar)'
+    assert clean('https://example.org/test)') == 'https://example.org/test'
+
+    # 3. Normal URLs and punctuation
+    assert clean('https://example.com') == 'https://example.com'
+    assert clean('https://example.com/foo.') == 'https://example.com/foo'
+    assert clean('https://example.com/foo,') == 'https://example.com/foo'
+    assert clean('https://example.com/foo;') == 'https://example.com/foo'
+    assert clean('https://example.com/foo!') == 'https://example.com/foo'
+    assert clean('https://example.com/foo?') == 'https://example.com/foo'
+    assert clean('https://example.com/foo]') == 'https://example.com/foo'
+
+    # Trailing punctuation combined with parentheses
+    assert clean('https://example.com).') == 'https://example.com'
+    assert clean('https://example.com.)') == 'https://example.com'
+    assert clean('https://en.wikipedia.org/wiki/Python_(programming_language)).') == (
+        'https://en.wikipedia.org/wiki/Python_(programming_language)'
+    )
+    assert clean('https://en.wikipedia.org/wiki/Python_(programming_language).)') == (
+        'https://en.wikipedia.org/wiki/Python_(programming_language)'
+    )
+
+    # Multiple trailing punctuation characters
+    assert clean('https://example.com/path...?!') == 'https://example.com/path'
+    assert clean('https://example.com/path)...') == 'https://example.com/path'
+    assert clean('https://example.com/path...).') == 'https://example.com/path'
+    assert clean('https://example.com/wiki/Foo_(bar)...') == 'https://example.com/wiki/Foo_(bar)'
+    assert clean('https://example.com/wiki/Foo_(bar))...') == 'https://example.com/wiki/Foo_(bar)'
+
+
+def test_export_links_csv_parentheses_and_preview_deduplication(tmp_path):
+    server = _load()
+    bot_id = '12345'
+    chat_dir = tmp_path / bot_id / '67890'
+    chat_dir.mkdir(parents=True)
+    (chat_dir / '67890_history.txt').write_text(
+        # 1 & 4. Webpage preview + user text duplicate with balanced parentheses
+        '[1][1001][2026-01-01 10:00:00] WebPage: Python (https://en.wikipedia.org/wiki/Python_(programming_language))\n'
+        'Check https://en.wikipedia.org/wiki/Python_(programming_language)\n'
+        # 2 & 4. WebPage preview + user text duplicate with normal URL
+        '[2][1002][2026-01-01 10:01:00] WebPage: Example Domain (https://example.com)\n'
+        'https://example.com\n'
+        # 2, 3 & 4. Multiple URLs with unmatched parenthesis in prose and in-message duplicate
+        '[3][1003][2026-01-01 10:02:00] see (https://example.org/first) and https://example.org/second and https://example.org/first\n'
+        # 5 & 6. Identical URL across different messages (from message 1) with different sender
+        '[4][1004][2026-01-01 10:03:00] https://en.wikipedia.org/wiki/Python_(programming_language)\n'
+        # 5 & 6. Identical URL across different messages (from message 2) with same sender
+        '[5][1002][2026-01-01 10:04:00] https://example.com\n'
+        # 7. Unmatched closing paren earlier with balanced pair at end and trailing punctuation
+        '[6][1005][2026-01-01 10:05:00] check (https://example.com/foo:)_bar_(baz))...\n'
+        # 8. Nested balanced parens enclosed in prose parens
+        '[7][1006][2026-01-01 10:06:00] nested (https://example.com/wiki/Foo_(bar_(baz)))\n'
+        # 9. Query param with parens and multiple punctuation
+        '[8][1007][2026-01-01 10:07:00] query https://example.com/search?q=(foo+bar)...?!\n',
+        encoding='utf-8',
+    )
+
+    saved, server.DUMP_ROOT = server.DUMP_ROOT, str(tmp_path)
+    try:
+        csv_text = server.links_csv(bot_id)
+    finally:
+        server.DUMP_ROOT = saved
+
+    assert csv_text.splitlines() == [
+        'link,sender_id',
+        'https://en.wikipedia.org/wiki/Python_(programming_language),1001',
+        'https://example.com,1002',
+        'https://example.org/first,1003',
+        'https://example.org/second,1003',
+        'https://en.wikipedia.org/wiki/Python_(programming_language),1004',
+        'https://example.com,1002',
+        'https://example.com/foo:)_bar_(baz),1005',
+        'https://example.com/wiki/Foo_(bar_(baz)),1006',
+        'https://example.com/search?q=(foo+bar),1007',
+    ]
+
+
 def test_viewer_has_export_links_button():
     html = Path(__file__).parents[1].joinpath('webapp', 'index.html').read_text(encoding='utf-8')
 

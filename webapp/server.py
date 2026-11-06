@@ -44,7 +44,7 @@ _new_dump_lock = threading.Lock()
 # [id] [from_id][optional to:/from:/group:] ... [date] text...   (greedy middle backtracks to release the date bracket)
 MSG_RE = re.compile(r'^\[(\d+)\]((?:\[[^\]]*\])*)\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[^\]]*)\]\s?(.*)$')
 MEDIA_RE = re.compile(r'^(?:Photo|Document|Photo of chat was changed): media/(.+)$')
-URL_RE = re.compile(r'https?://[^\s<>()"\']+')
+URL_RE = re.compile(r'https?://[^\s<>"\']+')
 USER_FIELDS = ('id', 'title', 'first_name', 'last_name', 'username', 'bot', 'premium', 'verified', 'scam', 'fake', 'phone')
 
 
@@ -182,6 +182,29 @@ def search_messages(bot_id, term, limit=300):
     return out[:limit]
 
 
+def clean_url(url):
+    """Strip trailing punctuation and unmatched closing parentheses from a URL."""
+    if not url:
+        return ''
+    while True:
+        stripped = url.rstrip('.,;:!?]')
+        if stripped != url:
+            url = stripped
+            continue
+        if url.endswith(')'):
+            depth = 0
+            for ch in url[:-1]:
+                if ch == '(':
+                    depth += 1
+                elif ch == ')' and depth > 0:
+                    depth -= 1
+            if depth == 0:
+                url = url[:-1]
+                continue
+        break
+    return url
+
+
 def iter_links(bot_id):
     """Yield (link, sender_id) rows for every URL found in a bot dump."""
     root = os.path.join(DUMP_ROOT, bot_id)
@@ -195,8 +218,12 @@ def iter_links(bot_id):
         if not os.path.isfile(hist):
             continue
         for msg in parse_history(hist, bot_id):
-            for link in URL_RE.findall(msg.get('text') or ''):
-                yield link.rstrip('.,;:!?]'), msg.get('from_id') or ''
+            seen = set()
+            for raw in URL_RE.findall(msg.get('text') or ''):
+                link = clean_url(raw)
+                if link and link not in seen:
+                    seen.add(link)
+                    yield link, msg.get('from_id') or ''
 
 
 def links_csv(bot_id):
