@@ -46,6 +46,28 @@ def test_export_links_csv_collects_links_with_sender_ids(tmp_path):
     ]
 
 
+def test_links_csv_balanced_parentheses_and_dedup_per_message(tmp_path):
+    server = _load()
+    bot_id = '12345'
+    chat = tmp_path / bot_id / '67890'
+    chat.mkdir(parents=True)
+    url = 'https://en.wikipedia.org/wiki/Python_(programming_language)'
+    (chat / '67890_history.txt').write_text(
+        f'[5][67890][2026-01-01 12:00:00] see {url} WebPage: Python ({url})\n'
+        f'[6][12345][to:67890][2026-01-01 12:01:00] again {url}.\n'
+        f'[7][67890][2026-01-01 12:02:00] wrapped (https://example.org/path)\n',
+        encoding='utf-8',
+    )
+    saved, server.DUMP_ROOT = server.DUMP_ROOT, str(tmp_path)
+    try:
+        actual = server.links_csv(bot_id)
+    finally:
+        server.DUMP_ROOT = saved
+    assert actual.splitlines() == [
+        'link,sender_id', f'{url},67890', f'{url},12345', 'https://example.org/path,67890',
+    ]
+
+
 def test_viewer_has_export_links_button():
     html = Path(__file__).parents[1].joinpath('webapp', 'index.html').read_text(encoding='utf-8')
 

@@ -44,7 +44,7 @@ _new_dump_lock = threading.Lock()
 # [id] [from_id][optional to:/from:/group:] ... [date] text...   (greedy middle backtracks to release the date bracket)
 MSG_RE = re.compile(r'^\[(\d+)\]((?:\[[^\]]*\])*)\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[^\]]*)\]\s?(.*)$')
 MEDIA_RE = re.compile(r'^(?:Photo|Document|Photo of chat was changed): media/(.+)$')
-URL_RE = re.compile(r'https?://[^\s<>()"\']+')
+URL_RE = re.compile(r'https?://[^\s<>"\']+')
 USER_FIELDS = ('id', 'title', 'first_name', 'last_name', 'username', 'bot', 'premium', 'verified', 'scam', 'fake', 'phone')
 
 
@@ -195,8 +195,15 @@ def iter_links(bot_id):
         if not os.path.isfile(hist):
             continue
         for msg in parse_history(hist, bot_id):
+            seen = set()
             for link in URL_RE.findall(msg.get('text') or ''):
-                yield link.rstrip('.,;:!?]'), msg.get('from_id') or ''
+                link = link.rstrip('.,;:!?]')
+                # Keep paired parentheses in a URL; discard only a closing wrapper.
+                while link.endswith(')') and link.count(')') > link.count('('):
+                    link = link[:-1]
+                if link and link not in seen:
+                    seen.add(link)
+                    yield link, msg.get('from_id') or ''
 
 
 def links_csv(bot_id):
