@@ -94,6 +94,10 @@ a run is interrupted, restart from the last printed lower bound:
 In live mode the last observed id is also written to
 ``<bot_id>/last_message_id.txt``.
 
+Pressing Ctrl+C ends the run with a one-line note and exit code ``130``; the
+history written so far stays on disk. After a downward dump (``--down``,
+``--start-from-id`` or ``--resume``) the note also points at ``--resume``.
+
 Routing through Tor
 -------------------
 
