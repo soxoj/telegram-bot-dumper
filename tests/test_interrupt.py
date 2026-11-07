@@ -29,3 +29,15 @@ def test_downward_dump_hints_at_resume(monkeypatch, capsys, flags):
 def test_other_dumps_omit_the_resume_hint(monkeypatch, capsys, flags):
     assert run_interrupted(monkeypatch, *flags) == 130
     assert capsys.readouterr().out == "Interrupted. History so far is saved.\n"
+
+
+def test_other_errors_still_raise(monkeypatch, capsys):
+    def fail(coro):
+        coro.close()
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("sys.argv", ["dumper.py", "--token", "1:fake"])
+    monkeypatch.setattr(asyncio, "run", fail)
+    with pytest.raises(RuntimeError, match="boom"):
+        runpy.run_path(dumper.__file__, run_name="__main__")
+    assert "Interrupted" not in capsys.readouterr().out
