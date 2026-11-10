@@ -254,7 +254,7 @@ def get_chat_id(message, bot_id):
             if m.from_id and int(m.from_id.user_id) == int(bot_id):
                 m_chat_id = str(m.to_id.user_id)
             else:
-                m_chat_id = str(m.from_id)
+                m_chat_id = str(m.from_id.user_id)
     elif isinstance(m.peer_id, PeerChat):
         m_chat_id = str(m.peer_id.chat_id)
     elif isinstance(m.peer_id, PeerChannel):
