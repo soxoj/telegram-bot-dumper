@@ -822,3 +822,9 @@ async def test_main_exits_early_on_no_listen(monkeypatch, tmp_path):
     assert disconnect_called == [True]
     assert run_until_disconnected_called == []
 
+
+def test_get_chat_id_pm_with_to_id_uses_user_id():
+    # numeric user id, not to a repr() of the sender peer object
+    m = _msg(PeerUser(user_id=42), from_id=PeerUser(user_id=42))
+    m.to_id = PeerUser(user_id=999)
+    assert dumper.get_chat_id(m, bot_id=999) == "42"
