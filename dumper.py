@@ -842,4 +842,9 @@ if __name__ == '__main__':
     NO_HISTORY = args.no_history
     HISTORY_DUMP_STEP = max(1, args.batch_size)
 
-    asyncio.run(main(args))
+    try:
+        asyncio.run(main(args))
+    except KeyboardInterrupt:
+        downward = args.resume or args.start_from_id or (args.down and not args.listen_only)
+        print('Interrupted. History so far is saved' + ('; continue with --resume.' if downward else '.'))
+        sys.exit(130)
