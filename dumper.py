@@ -333,6 +333,32 @@ def describe_service_action(action, from_id=None, reply_to_msg_id=None):
     return str(action)
 
 
+def format_buttons(reply_markup):
+    """One-line summary of a bot keyboard, or '' if the message has none.
+
+    Handles inline keyboards (ReplyInlineMarkup) and reply keyboards
+    (ReplyKeyboardMarkup). Plain and callback buttons are written as
+    [label], buttons with a url as [label → url]. Labels are kept verbatim
+    (emoji included) and callback payloads are not decoded.
+    """
+    rows = getattr(reply_markup, 'rows', None) or []
+    items = []
+    for row in rows:
+        for button in getattr(row, 'buttons', None) or []:
+            label = getattr(button, 'text', '')
+            # Older telethon layouts keep the url on the button itself; newer
+            # ones keep it on button.type (e.g. InlineButtonTypeUrl).
+            url = (getattr(button, 'url', None)
+                   or getattr(getattr(button, 'type', None), 'url', None))
+            if url:
+                items.append(f'[{label} → {url}]')
+            else:
+                items.append(f'[{label}]')
+    if not items:
+        return ''
+    return 'Buttons: ' + ' '.join(items)
+
+
 async def process_message(bot, m, empty_message_counter=0):
     m_chat_id = get_chat_id(m, bot.id)
     m_from_id = get_from_id(m, bot.id)
@@ -456,6 +482,10 @@ async def process_message(bot, m, empty_message_counter=0):
 
     if m.message:
         message_text  = '\n'.join([message_text, m.message]).strip()
+
+    buttons_line = format_buttons(getattr(m, 'reply_markup', None))
+    if buttons_line:
+        message_text = f'{message_text}\n{buttons_line}' if message_text else buttons_line
 
     is_group = isinstance(m.peer_id, (PeerChat, PeerChannel))
     is_outgoing_pm = (str(m_from_id) == str(bot.id)

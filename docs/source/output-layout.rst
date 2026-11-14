@@ -47,6 +47,20 @@ Media inside a message is written as a reference into the same line, e.g.
 ``media/`` directory beside the history file. With ``--no-media`` the reference
 is kept but marked ``(skipped)`` and nothing is downloaded.
 
+Bot keyboards
+~~~~~~~~~~~~~
+
+If a message carries an inline keyboard or a reply keyboard, its buttons are
+written on a continuation line right after the message text, each button wrapped
+in square brackets and separated by a space::
+
+   [12][42][2026-01-01 12:00:00] Choose:
+   Buttons: [Menu] [Help] [🔎 Search] [Website → https://example.com]
+
+Plain and callback buttons are written as ``[label]``; buttons that open a URL
+are written as ``[label → url]``. Labels are kept exactly as Telegram sent them,
+emoji included. Callback payloads are not decoded.
+
 ``users.csv``
 -------------
 
