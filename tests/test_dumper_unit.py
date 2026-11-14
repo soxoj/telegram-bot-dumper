@@ -8,6 +8,11 @@ import pytest
 
 import dumper
 from telethon.tl.types import (
+    ReplyInlineMarkup, ReplyKeyboardMarkup, ReplyKeyboardHide, KeyboardButtonRow,
+    KeyboardButton, KeyboardInlineButton, KeyboardInlineButtonRow,
+    ButtonTypeDefault, InlineButtonTypeCallback, InlineButtonTypeUrl, InlineButtonTypeWebView,
+)
+from telethon.tl.types import (
     PeerUser, PeerChat, PeerChannel,
     MessageEmpty, MessageMediaPhoto, MessageMediaGeo, MessageMediaContact,
     MessageMediaPoll, MessageMediaVenue, MessageMediaDice, MessageMediaGame,
@@ -822,3 +827,82 @@ async def test_main_exits_early_on_no_listen(monkeypatch, tmp_path):
     assert disconnect_called == [True]
     assert run_until_disconnected_called == []
 
+
+# ---------- process_message: bot keyboard buttons ----------
+
+def _buttons_message(markup, text="Choose:"):
+    m = _message(5, PeerUser(user_id=42), PeerUser(user_id=42), text=text)
+    m.reply_markup = markup
+    return m
+
+
+def _inline(label, button_type):
+    return KeyboardInlineButton(text=label, type=button_type)
+
+
+@pytest.mark.asyncio
+async def test_process_message_inline_keyboard_buttons_line(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    markup = ReplyInlineMarkup(rows=[
+        KeyboardInlineButtonRow(buttons=[
+            _inline("Menu", InlineButtonTypeCallback(data=b"menu")),
+            _inline("Help", InlineButtonTypeCallback(data=b"help")),
+        ]),
+        KeyboardInlineButtonRow(buttons=[
+            _inline("🔎 Search", InlineButtonTypeCallback(data=b"search")),
+            _inline("Website", InlineButtonTypeUrl(url="https://example.com")),
+        ]),
+    ])
+    await dumper.process_message(FakeBot(), _buttons_message(markup))
+    expected = "Buttons: [Menu] [Help] [🔎 Search] [Website → https://example.com]"
+    out = capsys.readouterr().out
+    assert "[5][42][2026-04-01] Choose:\n" + expected in out
+    assert dumper.messages_by_chat["42"]["buf"][-1].endswith(expected)
+
+
+@pytest.mark.asyncio
+async def test_process_message_web_app_button_keeps_url(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    markup = ReplyInlineMarkup(rows=[
+        KeyboardInlineButtonRow(buttons=[
+            _inline("Open app", InlineButtonTypeWebView(url="https://app.example.com")),
+        ]),
+    ])
+    await dumper.process_message(FakeBot(), _buttons_message(markup))
+    out = capsys.readouterr().out
+    assert "Buttons: [Open app → https://app.example.com]" in out
+
+
+@pytest.mark.asyncio
+async def test_process_message_reply_keyboard_buttons_line(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    markup = ReplyKeyboardMarkup(rows=[
+        KeyboardButtonRow(buttons=[
+            KeyboardButton(text="Yes", type=ButtonTypeDefault()),
+            KeyboardButton(text="👍 No", type=ButtonTypeDefault()),
+        ]),
+    ])
+    await dumper.process_message(FakeBot(), _buttons_message(markup))
+    out = capsys.readouterr().out
+    assert "Buttons: [Yes] [👍 No]" in out
+
+
+@pytest.mark.asyncio
+async def test_process_message_buttons_without_text(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    markup = ReplyKeyboardMarkup(rows=[
+        KeyboardButtonRow(buttons=[KeyboardButton(text="Go", type=ButtonTypeDefault())]),
+    ])
+    await dumper.process_message(FakeBot(), _buttons_message(markup, text=""))
+    out = capsys.readouterr().out
+    assert "[5][42][2026-04-01] Buttons: [Go]" in out
+
+
+@pytest.mark.asyncio
+async def test_process_message_without_buttons_is_untouched(monkeypatch, capsys):
+    monkeypatch.setattr(dumper, "all_users", {"42": object()})
+    await dumper.process_message(FakeBot(), _buttons_message(None))
+    await dumper.process_message(FakeBot(), _buttons_message(ReplyKeyboardHide()))
+    out = capsys.readouterr().out
+    assert "Buttons:" not in out
+    assert "[5][42][2026-04-01] Choose:" in out
