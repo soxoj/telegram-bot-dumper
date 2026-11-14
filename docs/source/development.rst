@@ -31,8 +31,7 @@ Building these docs
    pip install -r docs/requirements.txt
    cd docs && make html          # output in docs/build/html
 
-The docs mirror the sibling `Maigret <https://maigret.readthedocs.io>`_ and
-socid_extractor setup: Sphinx with the Read the Docs theme, published on Read
-the Docs via ``.readthedocs.yaml``. A translation pipeline (``make gettext`` /
+The docs use Sphinx with the Read the Docs theme and are published on Read the
+Docs via ``.readthedocs.yaml``. A translation pipeline (``make gettext`` /
 ``make intl-update LANG=<code>`` / ``make html-<code>``) is wired up in
 ``docs/Makefile`` but no catalogs exist yet.
