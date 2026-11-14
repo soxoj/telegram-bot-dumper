@@ -22,6 +22,29 @@ From an open chat, **Download chat** saves its history, media, and photos as
 ``dump_<bot_id>_<chat_id>.zip`` (other chats and bot-level files excluded), and
 **Export links** saves every URL across the dump with its sender id as a CSV.
 
+.. _viewer-quick-start:
+
+Quick start
+-----------
+
+Run the viewer with live mode and dumping of new bots, without Docker:
+
+.. code-block:: sh
+
+   pip install -r requirements.txt
+   cp .env.example .env      # fill in API_ID and API_HASH from https://my.telegram.org
+   ./run-viewer.sh
+
+Open http://127.0.0.1:8010 and paste a bot token. A bot that already has a dump
+opens it; a new bot gets its folder and ``bot.json``. Either way live mode starts
+right after login: the viewer dumps the history it doesn't have yet and then shows
+new messages as they arrive.
+
+``run-viewer.sh`` reads ``API_ID``, ``API_HASH`` and the optional ``PORT`` /
+``HOST`` from ``.env`` and starts ``webapp/server.py --allow-new-dumps``. Extra
+arguments are passed on, so ``./run-viewer.sh ~/dumps`` serves another folder.
+By default it listens on ``127.0.0.1`` only; see :ref:`new-dumps` before exposing it.
+
 Run from a prebuilt image (Docker Hub)
 --------------------------------------
 
@@ -42,7 +65,8 @@ Without Docker
 .. code-block:: sh
 
    pip install -r requirements.txt
-   python webapp/server.py        # serves the current directory's dumps on :8010
+   python webapp/server.py        # serves dumps from the repository folder on :8010
+   python webapp/server.py ~/dumps  # or from another folder
 
 Open http://127.0.0.1:8010 and paste a bot token to pick its dump folder.
 
@@ -61,6 +85,9 @@ never baked into the image:
 
    # or with docker compose: put them in a local .env (see .env.example)
    cp .env.example .env && $EDITOR .env && docker compose up
+
+   # or without Docker
+   API_ID=123456 API_HASH=abc... python webapp/server.py
 
 Configuration
 -------------
@@ -91,6 +118,8 @@ Configuration
      - Set ``1`` (CLI ``--allow-public``) to allow ``ALLOW_NEW_DUMPS`` on a
        non-loopback ``HOST``. Without it the server refuses to start in that case.
 
+.. _new-dumps:
+
 Dumping a new bot from the viewer
 ---------------------------------
 
@@ -112,3 +141,7 @@ an unknown token is instead checked with Telegram, the bot gets its folder and
    docker run --rm -p 127.0.0.1:8010:8010 -v "$PWD:/data" \
      -e API_ID=123456 -e API_HASH=abc... -e ALLOW_NEW_DUMPS=1 -e ALLOW_PUBLIC=1 \
      soxoj/telegram-bot-dumper-web
+
+Without Docker, ``./run-viewer.sh`` from the :ref:`quick start <viewer-quick-start>`
+does the same, or pass the flag yourself:
+``API_ID=123456 API_HASH=abc... python webapp/server.py --allow-new-dumps``.

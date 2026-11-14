@@ -44,7 +44,8 @@ docker compose up --build      # builds and serves on http://127.0.0.1:8010
 
 ```sh
 pip install -r requirements.txt
-python webapp/server.py        # serves the current directory's dumps on :8010
+python webapp/server.py        # serves dumps from the repository folder on :8010
+./run-viewer.sh                # live mode + dumping new bots, API_ID/API_HASH from .env
 ```
 
 Open <http://127.0.0.1:8010> and paste the bot token to open its dump: it must match the token saved in that dump's `bot.json`. Read-only viewing needs no API credentials. **Live mode** additionally needs `API_ID`/`API_HASH` from [my.telegram.org](https://my.telegram.org), passed via the environment — never baked into the image:
