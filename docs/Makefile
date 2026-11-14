@@ -14,7 +14,7 @@ help:
 
 .PHONY: help Makefile gettext intl-update html-zh_CN
 
-# Translation pipeline (mirrors the sibling Maigret / socid_extractor docs)
+# Translation pipeline
 #
 # 1. `make gettext` regenerates .pot files from the English .rst sources.
 # 2. `make intl-update LANG=zh_CN` syncs the .po files for that language.

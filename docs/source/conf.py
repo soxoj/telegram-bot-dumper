@@ -15,8 +15,7 @@ author = 'soxoj'
 #
 # Default to English. Translation projects on Read the Docs set the
 # ``READTHEDOCS_LANGUAGE`` env var (e.g. ``zh_CN``); locally the language can be
-# overridden via ``sphinx-build -D language=zh_CN``. Mirrors the sibling Maigret
-# and socid_extractor docs. No catalogs exist yet -- ``make intl-update
+# overridden via ``sphinx-build -D language=zh_CN``. No catalogs exist yet -- ``make intl-update
 # LANG=<code>`` in docs/ bootstraps one.
 language = os.environ.get('READTHEDOCS_LANGUAGE', 'en')
 locale_dirs = ['locale/']
@@ -25,8 +24,7 @@ gettext_uuid = True
 
 # -- General configuration
 #
-# Deliberately short: the siblings carry autodoc/autosummary/intersphinx that
-# nothing in their .rst files ever calls. Add an extension when a page needs it.
+# Deliberately short: add an extension when a page needs it.
 
 extensions = [
     'sphinx.ext.duration',
