@@ -778,12 +778,11 @@ async def main(args):
         #TODO: old messages processing
         sender = event.message.sender
         chat = await event.get_chat()
-        chat_id = event.message.chat_id
+        chat_id = get_chat_id(event.message, bot.id)
         if not chat_id in all_chats:
             if isinstance(event.message.peer_id, (PeerChat, PeerChannel)):
                 await save_chat_photo(bot, chat)
             all_chats[chat_id] = event.message.input_chat
-            messages_by_chat[chat_id] = {'history': [], 'buf': []}
             print('='*20 + f'\nNEW CHAT DETECTED: {chat_id} {chat_display_name(chat)}')
             if isinstance(sender, User) and sender.id not in all_users:
                 print_user_info(sender)
