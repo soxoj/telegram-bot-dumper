@@ -597,12 +597,14 @@ async def probe_max_id(bot, max_pow=9):
             highest = max(highest, m.id)
     # powers of ten only give a lower bound: walk up until a whole batch is empty.
     # ponytail: a gap of more than one batch of deleted ids above the hit still cuts the top off
+    probed = highest
     while highest:
         msgs = await bot(GetMessagesRequest(list(range(highest + 1, highest + 1 + HISTORY_DUMP_STEP))))
         real = [m.id for m in msgs.messages if not isinstance(m, MessageEmpty)]
         if not real or max(real) <= highest:
             break
         highest = max(real)
+    if highest > probed:
         print(f'  found newer messages up to id={highest}')
     return highest
 
