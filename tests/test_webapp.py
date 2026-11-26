@@ -75,6 +75,14 @@ def test_viewer_has_export_links_button():
     assert '/api/links.csv?bot=' in html
 
 
+def test_viewer_has_download_all_button():
+    html = Path(__file__).parents[1].joinpath('webapp', 'index.html').read_text(encoding='utf-8')
+
+    assert 'id="export-all"' in html
+    assert 'Download all' in html
+    assert '/api/export?bot=' in html
+
+
 def test_viewer_shows_one_pane_at_phone_width():
     html = Path(__file__).parents[1].joinpath('webapp', 'index.html').read_text(encoding='utf-8')
 
@@ -116,6 +124,7 @@ def test_viewer_requires_the_real_token_and_hides_secrets(tmp_path):
         assert call('/api/messages?bot=12345&chat=67890')[0] == 401
         assert call('/file/12345/bot.json')[0] == 401
         assert call('/api/export?bot=12345&chat=67890')[0] == 401
+        assert call('/api/export?bot=12345')[0] == 401
         assert call('/api/start', {'token': token})[0] == 401
         # right id, wrong hash, or no dump at all: no login, and the answer says which
         wrong, unknown = call('/api/login', {'token': '12345:guess'}), call('/api/login', {'token': '99999:x'})
@@ -129,6 +138,7 @@ def test_viewer_requires_the_real_token_and_hides_secrets(tmp_path):
         assert status == 200
         sid = set_cookie.split(';')[0]
         assert b'secret chat' in call('/api/messages?bot=12345&chat=67890', cookie=sid)[1]
+        assert call('/api/export?bot=12345', cookie=sid)[0] == 200
         # even with a session, the token and the auth key are never served
         assert call('/file/12345/bot.json', cookie=sid)[0] == 404
         assert call('/file/12345/12345.session', cookie=sid)[0] == 404

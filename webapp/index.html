@@ -138,6 +138,7 @@
       <span id="botav"></span>
       <div class="grow"><div class="title" id="botname"></div>
         <div class="sub"><span id="botsub"></span><span id="livebadge" class="live"></span></div></div>
+      <button id="export-all" class="iconbtn" type="button" title="Download entire dump as a ZIP">Download all</button>
       <button id="export-links" class="iconbtn" type="button" title="Download all links as CSV">Export links</button>
     </header>
     <div id="searchbar"><input id="q" type="search" placeholder="Search messages" autocomplete="off" spellcheck="false"></div>
@@ -365,6 +366,10 @@ function exportLinks(){
   if(!BOT) return;
   download('/api/links.csv?bot='+encodeURIComponent(BOT.botId));
 }
+function exportAll(){
+  if(!BOT) return;
+  window.location.href = '/api/export?bot='+encodeURIComponent(BOT.botId);
+}
 function exportChat(){
   if(!BOT || !OPEN) return;
   download('/api/export?bot='+encodeURIComponent(BOT.botId)+'&chat='+encodeURIComponent(OPEN));
@@ -485,6 +490,7 @@ document.addEventListener('keydown',e=>{
 $('#lb').addEventListener('click',()=>{ $('#lb').style.display='none'; });
 $('#back').addEventListener('click',()=>$('#app').classList.remove('chat'));
 $('#export-links').addEventListener('click',exportLinks);
+$('#export-all').addEventListener('click',exportAll);
 $('#export-chat').addEventListener('click',exportChat);
 $('#go').addEventListener('click',doLogin);
 $('#token').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
